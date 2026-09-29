@@ -7,7 +7,7 @@ export const ROLES = ["coordinator", "reviewer", "fixer"] as const;
 const manifest: PaperclipPluginManifestV1 = {
   id: PLUGIN_ID,
   apiVersion: 1,
-  version: "0.1.5",
+  version: "0.1.6",
   displayName: "Paperclip PR Review",
   description: "Visible, contextual PR review and remediation with durable readiness gates.",
   author: "Paperclip PR Review contributors",

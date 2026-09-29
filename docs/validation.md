@@ -21,6 +21,8 @@ pnpm test:host
 
 The final isolated run passed five unit tests and the host behavior test. `pnpm pack` included the worker and manifest bundles, migration, CLI, lockfile, sources, and the pinned SDK snapshots. The package tarball was opened and scanned for author home paths, fixture company IDs, validation ports, and a fixed author model; no match was found. The JSON behavior record [host-fixture-result.json](host-fixture-result.json) has SHA-256 `a8fbd34d61bc2279a72c8345f62c79ae3420078166d00872bce28ea0417c4ac8`. It records the local Git base, bad and fixed commit SHAs and the observed scenario outcomes.
 
+A fresh local clone of commit `f33b83f679df6f0786c265c564a534dfe59fca55` also passed offline frozen install, typecheck, all five unit tests, build and pack without reading the source checkout's `node_modules` or ignored `dist`. Its tarball matched SHA-256 `c41644b699e1f1ce75696706c714bd88c1b5b9bafb3f5fe02cc5d3ad7a1a7b27`. This checks that the tracked SDK snapshots and lockfile suffice when the pnpm store already contains the public dependencies.
+
 ## Scenario results
 
 | Required scenario | Evidence and result | Limit |

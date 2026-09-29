@@ -56,6 +56,8 @@ curl -H "Authorization: Bearer $PAPERCLIP_API_KEY" 'HOST_URL/api/plugins/ty000.p
 curl -H "Authorization: Bearer $PAPERCLIP_API_KEY" 'HOST_URL/api/plugins/ty000.plugin-pr-review/api/missions/MISSION_ID?companyId=COMPANY_ID'
 ```
 
+The plugin resolves company scope from `?companyId=COMPANY_ID` on mission GET requests and from `"companyId":"COMPANY_ID"` in the JSON body of mission POST requests. A review POST also requires `headSha`, `contextHash`, `phase` (`initial` or `final`), `findings`, and `coverage: { complete: boolean, criteria: string[], files: string[], limits: string[] }`. For complete coverage, copy the exact strings from the current mission's `context.acceptanceCriteria[].criterion` and `context.files` into the matching coverage arrays. Each finding needs `cause`, `invariant`, `severity`, relative `path`, positive `line`, `evidence`, and `impact`. Fetch the current mission before a retry and confirm the POST response before treating the review as recorded.
+
 For a mission in `waiting_external` or `needs_intervention`, first compare live base/head and reconcile any reserved external effect. Then run:
 
 ```bash

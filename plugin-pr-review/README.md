@@ -1,0 +1,7 @@
+# Plugin package
+
+`@ty000/plugin-pr-review` is a single external Paperclip plugin. Its worker owns the durable mission state and managed resource definitions in `src/manifest.ts`; Paperclip owns agent execution, issues, the project, skill, routine, and credentials. `bin/pr-review.mjs` is the operator CLI. The package uses local snapshots of the Paperclip plugin SDK 1.0.0 and shared types 0.3.1 under `.paperclip-sdk/`, built from Paperclip commit `61b3fd57a695614dc4a37e2303f426a34a9795cf`. Those snapshots are versioned for reproducible local builds. Paperclip itself is not bundled.
+
+From this directory run `pnpm install --frozen-lockfile`, `pnpm typecheck`, `pnpm test`, and `pnpm build`. For a host test, set `PAPERCLIP_TEST_API` and `PAPERCLIP_TEST_COMPANY`, then run `pnpm test:host`. This test creates mission records and issues in the selected isolated company, and creates a local Git fixture under the system temporary directory.
+
+The CLI commands are `plan`, `install`, `status`, `update`, `configure`, `activate`, `export`, `diff`, `start`, and `resume`. Each requires `--api URL --company ID` (or `PAPERCLIP_API_URL` and `PAPERCLIP_COMPANY_ID`). `--instance NAME` is an operator assertion: the host API does not report the instance ID. `--commit SHA` checks the host commit. `PAPERCLIP_API_KEY` is the only CLI credential input; never put a token in an export or repository file. See [operations](../docs/operations.md) for exact procedures and the distinct lifecycle states.

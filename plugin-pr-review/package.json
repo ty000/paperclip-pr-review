@@ -1,0 +1,53 @@
+{
+  "name": "@ty000/plugin-pr-review",
+  "version": "0.1.4",
+  "type": "module",
+  "private": true,
+  "files": [
+    ".paperclip-sdk/*.tgz",
+    "bin",
+    "dist",
+    "migrations",
+    "src",
+    "tests",
+    "README.md",
+    "LICENSE",
+    "pnpm-lock.yaml",
+    "esbuild.config.mjs",
+    "tsconfig.json",
+    "vitest.config.ts"
+  ],
+  "description": "Context-aware PR review and remediation",
+  "bin": { "paperclip-pr-review": "./bin/pr-review.mjs" },
+  "scripts": {
+    "build": "node ./esbuild.config.mjs",
+    "dev": "node ./esbuild.config.mjs --watch",
+    "test": "vitest run --config ./vitest.config.ts",
+    "test:host": "node tests/host-integration.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "paperclipPlugin": {
+    "manifest": "./dist/manifest.js",
+    "worker": "./dist/worker.js"
+  },
+  "keywords": [
+    "paperclip",
+    "plugin",
+    "automation"
+  ],
+  "author": "Paperclip PR Review contributors",
+  "license": "MIT",
+  "pnpm": {
+    "overrides": {
+      "@paperclipai/shared": "file:.paperclip-sdk/paperclipai-shared-0.3.1.tgz"
+    }
+  },
+  "devDependencies": {
+    "@paperclipai/shared": "file:.paperclip-sdk/paperclipai-shared-0.3.1.tgz",
+    "@paperclipai/plugin-sdk": "file:.paperclip-sdk/paperclipai-plugin-sdk-1.0.0.tgz",
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.27.3",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  }
+}

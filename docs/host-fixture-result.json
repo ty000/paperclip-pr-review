@@ -1,0 +1,22 @@
+{
+  "result": "pass",
+  "baseSha": "df0513c50b26f5fd16dec5aec3fb86f4686c5d8b",
+  "badSha": "89e761ac48d6af41a0b78305b27ae4cc5770806f",
+  "fixedSha": "1242e48092d56d047ea18ee4d494106aa3cf7284",
+  "outcomes": [
+    "concurrent triggers reuse one mission and phase issue",
+    "resume budget is reserved and confirmed once",
+    "context hash is shared and stale head review rejected",
+    "duplicate observations retain one finding and both observations",
+    "external effect reservation survives retry without duplicate",
+    "real fixture commit corrects defect and confirms bounded attempt",
+    "readiness refused: red CI",
+    "readiness refused: pending CI",
+    "readiness refused: conflict",
+    "readiness refused: approval",
+    "readiness refused: unexplained job",
+    "independent final review and fresh evidence reached fixture readiness",
+    "second resume after budget exhaustion stops explicitly",
+    "host resume creates one coordinator issue and reserves a finite attempt"
+  ]
+}

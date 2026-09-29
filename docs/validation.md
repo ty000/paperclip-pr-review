@@ -51,6 +51,8 @@ A fresh local clone of commit `f33b83f679df6f0786c265c564a534dfe59fca55` also pa
 | Actual Paperclip agent executed | No | No |
 | Real GitHub PR canary executed | No | No |
 
+Both disposable hosts were stopped after readback. The table reports their observed state while running; it does not claim that their plugin workers remain loaded now.
+
 ## Remaining proof boundary
 
 The current plugin trusts agent-submitted GitHub evidence. Its state machine can establish internal consistency and reject incomplete claims, but it cannot independently establish the current GitHub remote state. This blocks a product-level assertion that a real PR is **verified clean and mergeable**. The target PR, GitHub permissions, adapter credentials, and authorization for external actions were not supplied, and the run expressly prohibited real PR comments, pushes and merges. A later canary requires an explicit repository/PR, a disposable or approved branch, host credentials, separate modification/push/comment/thread permissions, and live readback of the GitHub state. The product never merges.

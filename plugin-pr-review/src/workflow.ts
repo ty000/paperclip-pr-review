@@ -38,8 +38,8 @@ export interface Mission {
   lastFixerActorId: string | null; correctionIntent: { findingIds: string[]; defect: string; change: string; expectedProof: string; actorId: string; at: string } | null;
   budgets: { maxCorrections: number; correctionsReserved: number; correctionsConfirmed: number; maxResumes: number; resumesReserved: number; resumesConfirmed: number };
   pendingIssue: { key: string; role: "coordinator" | "reviewer" | "fixer"; description: string; leaseOwner?: string; leaseUntil?: string } | null;
-  issueIds: Record<string, string>; rootIssueId: string | null;
-  effects: Record<string, { kind: string; state: "reserved" | "confirmed"; at: string; receipt?: string }>;
+  issueIds: Record<string, string>; rootIssueId: string | null; phaseSequence: number;
+  effects: Record<string, { kind: string; state: "reserved" | "confirmed"; at: string; receipt?: string; resumeApplied?: boolean }>;
   verdict: { state: Stage; reasons: string[]; headSha: string; baseSha: string; at: string; sourceRefs: string[] } | null;
   createdAt: string; updatedAt: string; version: number;
 }
@@ -50,6 +50,44 @@ const array = (v: unknown, label: string): unknown[] => { if (!Array.isArray(v))
 const strings = (v: unknown, label: string): string[] => array(v, label).map((s, i) => text(s, `${label}[${i}]`));
 const sha = (v: unknown, label: string): string => { const s = text(v, label).toLowerCase(); if (!SHA.test(s)) throw new Error(`${label} must be a 40-character SHA`); return s; };
 const record = (v: unknown, label: string): Record<string, unknown> => { if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error(`${label} must be an object`); return v as Record<string, unknown>; };
+const boolean = (v: unknown, label: string): boolean => { if (typeof v !== "boolean") throw new Error(`${label} must be a boolean`); return v; };
+const nullableBoolean = (v: unknown, label: string): boolean | null => v === null ? null : boolean(v, label);
+const conclusions = ["success", "failure", "pending", "skipped", "neutral", "unknown"] as const;
+const severityRank = (severity: Finding["severity"]): number => ["suggestion", "low", "medium", "high", "critical"].indexOf(severity);
+function conclusion(v: unknown, label: string): ReadinessEvidence["checks"][number]["conclusion"] {
+  if (!conclusions.some(candidate => candidate === v)) throw new Error(`${label} has an invalid conclusion`);
+  return v as ReadinessEvidence["checks"][number]["conclusion"];
+}
+export function validateReadinessEvidence(value: unknown): ReadinessEvidence {
+  const e = record(value, "readiness evidence");
+  const platform = (value: unknown, label: string, field: "satisfied" | "resolved") => {
+    const r = record(value, label);
+    return { [field]: nullableBoolean(r[field], `${label}.${field}`), sourceRef: text(r.sourceRef, `${label}.sourceRef`) };
+  };
+  const rules = record(e.rules, "rules");
+  const observedAt = text(e.observedAt, "observedAt");
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(observedAt) || Number.isNaN(Date.parse(observedAt)) || new Date(observedAt).toISOString().slice(0, 19) !== observedAt.slice(0, 19)) throw new Error("observedAt must be a valid UTC timestamp");
+  return {
+    headSha: sha(e.headSha, "headSha"), baseSha: sha(e.baseSha, "baseSha"),
+    remoteHeadSha: sha(e.remoteHeadSha, "remoteHeadSha"), currentBaseSha: sha(e.currentBaseSha, "currentBaseSha"),
+    observedAt, sourceRefs: strings(e.sourceRefs, "sourceRefs"), conflict: nullableBoolean(e.conflict, "conflict"),
+    checks: array(e.checks, "checks").map((value, i) => {
+      const c = record(value, `checks[${i}]`);
+      return { name: text(c.name, `checks[${i}].name`), conclusion: conclusion(c.conclusion, `checks[${i}]`), required: boolean(c.required, `checks[${i}].required`), applicable: boolean(c.applicable, `checks[${i}].applicable`), sourceRef: text(c.sourceRef, `checks[${i}].sourceRef`) };
+    }),
+    jobs: array(e.jobs, "jobs").map((value, i) => {
+      const j = record(value, `jobs[${i}]`);
+      return { name: text(j.name, `jobs[${i}].name`), conclusion: conclusion(j.conclusion, `jobs[${i}]`), explained: boolean(j.explained, `jobs[${i}].explained`), sourceRef: text(j.sourceRef, `jobs[${i}].sourceRef`) };
+    }),
+    approvals: platform(e.approvals, "approvals", "satisfied") as ReadinessEvidence["approvals"],
+    conversations: platform(e.conversations, "conversations", "resolved") as ReadinessEvidence["conversations"],
+    rules: { satisfied: nullableBoolean(rules.satisfied, "rules.satisfied"), allowsSkipped: boolean(rules.allowsSkipped, "rules.allowsSkipped"), allowsNeutral: boolean(rules.allowsNeutral, "rules.allowsNeutral"), sourceRef: text(rules.sourceRef, "rules.sourceRef") },
+    tests: array(e.tests, "tests").map((value, i) => {
+      const t = record(value, `tests[${i}]`);
+      return { name: text(t.name, `tests[${i}].name`), passed: boolean(t.passed, `tests[${i}].passed`), sourceRef: text(t.sourceRef, `tests[${i}].sourceRef`) };
+    })
+  };
+}
 function stable(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stable);
   if (value && typeof value === "object") return Object.fromEntries(Object.keys(value).sort().map(k => [k, stable((value as Record<string, unknown>)[k])]));
@@ -87,20 +125,28 @@ export function createMission(input: { id: string; companyId: string; repository
   if (Object.values(rawRights).some(v => typeof v !== "boolean")) throw new Error("rights values must be booleans");
   const rights = { modify: rawRights.modify === true || input.mode === "fixture", push: rawRights.push === true, comment: rawRights.comment === true, resolveThreads: rawRights.resolveThreads === true };
   const now = new Date().toISOString();
-  return { schemaVersion: 1, id: input.id, companyId: input.companyId, repository: input.repository, prNumber: input.prNumber, mode: input.mode === "fixture" ? "fixture" : "github", rights, stage: "context", headSha: "", baseSha: "", context: null, findings: [], review: null, lastFixerActorId: null, correctionIntent: null, budgets: { maxCorrections, correctionsReserved: 0, correctionsConfirmed: 0, maxResumes, resumesReserved: 0, resumesConfirmed: 0 }, pendingIssue: { key: "context-0", role: "coordinator", description: `Prepare context for ${input.repository}#${input.prNumber}. Submit the versioned context to the plugin API.` }, issueIds: {}, rootIssueId: null, effects: {}, verdict: null, createdAt: now, updatedAt: now, version: 0 };
+  return { schemaVersion: 1, id: input.id, companyId: input.companyId, repository: input.repository, prNumber: input.prNumber, mode: input.mode === "fixture" ? "fixture" : "github", rights, stage: "context", headSha: "", baseSha: "", context: null, findings: [], review: null, lastFixerActorId: null, correctionIntent: null, budgets: { maxCorrections, correctionsReserved: 0, correctionsConfirmed: 0, maxResumes, resumesReserved: 0, resumesConfirmed: 0 }, pendingIssue: { key: "context-0", role: "coordinator", description: `Prepare context for ${input.repository}#${input.prNumber}. Submit the versioned context to the plugin API.` }, issueIds: {}, rootIssueId: null, phaseSequence: 0, effects: {}, verdict: null, createdAt: now, updatedAt: now, version: 0 };
 }
 
-const issue = (m: Mission, role: "coordinator" | "reviewer" | "fixer", stage: string, description: string) => ({ key: `${stage}-${m.budgets.correctionsConfirmed}-${m.budgets.resumesReserved}-${m.headSha.slice(0, 12)}`, role, description: `${description}\nMission: ${m.id}\nHead: ${m.headSha}\nContext hash: ${m.context?.hash ?? "pending"}. Read current state from the plugin API before acting.` });
+const issue = (m: Mission, role: "coordinator" | "reviewer" | "fixer", stage: string, description: string) => {
+  m.phaseSequence = (m.phaseSequence ?? 0) + 1;
+  return { key: `${stage}-${m.budgets.correctionsConfirmed}-${m.budgets.resumesReserved}-${m.headSha.slice(0, 12)}-${(m.context?.hash ?? m.baseSha).slice(0, 12)}-${m.phaseSequence}`, role, description: `${description}\nMission: ${m.id}\nHead: ${m.headSha}\nContext hash: ${m.context?.hash ?? "pending"}. Read current state from the plugin API before acting.` };
+};
 function requireStage(m: Mission, ...stages: Stage[]) { if (!stages.includes(m.stage)) throw new Error(`Expected stage ${stages.join(" or ")}, got ${m.stage}`); }
 
-export function evaluateReadiness(m: Mission, e: ReadinessEvidence): string[] {
+export function evaluateReadiness(m: Mission, evidence: ReadinessEvidence, referenceAt = new Date().toISOString()): string[] {
+  let e: ReadinessEvidence;
+  try { e = validateReadinessEvidence(evidence); }
+  catch { return ["readiness evidence malformed"]; }
   const reasons: string[] = [];
   if (!m.context || !m.review || m.review.phase !== "final" || !m.review.coverage.complete || m.review.coverage.limits.length) reasons.push("final independent review coverage incomplete");
   if (m.review && m.review.actorId === m.lastFixerActorId) reasons.push("fixer was final validator");
-  if (m.findings.some(f => ((f.status === "open" || f.status === "deferred") && f.severity !== "suggestion") || (f.status === "rejected" && ["critical", "high"].includes(f.severity)) || (f.status === "duplicate" && (!f.duplicateOf || !m.findings.some(other => other.id === f.duplicateOf))))) reasons.push("actionable or serious finding unresolved");
+  if (m.findings.some(f => ((f.status === "open" || f.status === "deferred") && f.severity !== "suggestion") || (f.status === "rejected" && ["critical", "high"].includes(f.severity)) || (f.status === "duplicate" && (!f.duplicateOf || !m.findings.some(other => other.id === f.duplicateOf && other.status !== "duplicate" && severityRank(other.severity) >= severityRank(f.severity)))))) reasons.push("actionable or serious finding unresolved");
   if (m.context && (m.context.objective === null || m.context.acceptanceCriteria.length === 0 || m.context.unknowns.length || m.context.coverageLimits.length)) reasons.push("context incomplete");
   if (e.headSha !== m.headSha || e.baseSha !== m.baseSha || e.remoteHeadSha !== m.headSha || e.currentBaseSha !== m.baseSha) reasons.push("head or base evidence stale");
-  if (!e.sourceRefs.length || !e.observedAt || Number.isNaN(Date.parse(e.observedAt))) reasons.push("readiness provenance missing");
+  if (!e.sourceRefs.length) reasons.push("readiness provenance missing");
+  const ageMs = Date.parse(referenceAt) - Date.parse(e.observedAt);
+  if (!Number.isFinite(ageMs) || ageMs > 10 * 60_000 || ageMs < -60_000) reasons.push("readiness evidence stale or future-dated");
   if (e.conflict !== false) reasons.push("merge conflict or conflict state unknown");
   if (e.rules.satisfied !== true || e.approvals.satisfied !== true || e.conversations.resolved !== true) reasons.push("rules, approvals or conversations unsatisfied");
   if (![e.rules.sourceRef, e.approvals.sourceRef, e.conversations.sourceRef].every(Boolean)) reasons.push("platform evidence source missing");
@@ -139,7 +185,12 @@ export function applyCommand(m: Mission, command: MissionCommand): Mission {
     });
     for (const f of observations) {
       const existing = next.findings.find(x => x.id === f.id);
-      if (existing) { existing.observations.push({ headSha: next.headSha, at, actorId: command.actorId }); if (existing.status === "fixed") { existing.status = "open"; existing.reason = "Observed again on current head"; } }
+      if (existing) {
+        Object.assign(existing, f);
+        existing.observations.push({ headSha: next.headSha, at, actorId: command.actorId });
+        existing.status = "open"; existing.reason = "Observed again on current head";
+        delete existing.duplicateOf;
+      }
       else next.findings.push({ ...f, status: "open", reason: "", observations: [{ headSha: next.headSha, at, actorId: command.actorId }], correctionRefs: [], verificationRefs: [] });
     }
     next.review = { phase, actorId: command.actorId, headSha: next.headSha, contextHash: next.context!.hash, coverage, at };
@@ -159,9 +210,10 @@ export function applyCommand(m: Mission, command: MissionCommand): Mission {
     if (!["rejected", "duplicate", "deferred"].includes(status)) throw new Error("Invalid disposition");
     if (status === "duplicate") {
       const canonical = next.findings.find(f => f.id === text(p.duplicateOf, "duplicateOf"));
-      if (!canonical || canonical.id === finding.id) throw new Error("Duplicate requires another canonical finding");
+      if (!canonical || canonical.id === finding.id || canonical.status === "duplicate" || next.findings.some(f => f.duplicateOf === finding.id)) throw new Error("Duplicate requires an independent canonical finding");
+      if (severityRank(canonical.severity) < severityRank(finding.severity)) throw new Error("Canonical finding cannot have lower severity");
       finding.duplicateOf = canonical.id;
-    }
+    } else delete finding.duplicateOf;
     finding.status = status; finding.reason = text(p.reason, "reason");
     if (next.stage === "correction_intent" && !next.findings.some(f => f.status === "open" && f.severity !== "suggestion")) {
       next.stage = "final_review";
@@ -195,9 +247,8 @@ export function applyCommand(m: Mission, command: MissionCommand): Mission {
     next.pendingIssue = issue(next, "coordinator", "context", "Refresh context for the new head, preserving previous findings and decisions.");
   } else if (command.kind === "evidence") {
     requireStage(next, "readiness", "waiting_external", "needs_intervention");
-    const e = p as unknown as ReadinessEvidence;
-    if (!Array.isArray(e.checks) || !Array.isArray(e.jobs) || !Array.isArray(e.tests) || !Array.isArray(e.sourceRefs) || !e.rules || !e.approvals || !e.conversations) throw new Error("Incomplete readiness evidence schema");
-    const reasons = evaluateReadiness(next, e);
+    const e = validateReadinessEvidence(p);
+    const reasons = evaluateReadiness(next, e, at);
     next.stage = reasons.length ? (reasons.some(x => /pending|unknown|missing|stale/i.test(x)) ? "waiting_external" : "needs_intervention") : "verified_mergeable";
     next.verdict = { state: next.stage, reasons, headSha: next.headSha, baseSha: next.baseSha, at, sourceRefs: e.sourceRefs };
     next.pendingIssue = null;
@@ -210,8 +261,14 @@ export function applyCommand(m: Mission, command: MissionCommand): Mission {
     if (kind === "push" && !next.rights.push) throw new Error("Push permission is disabled");
     if (action === "reserve") {
       if (next.effects[key]) return next;
-      if (kind === "resume") { if (next.budgets.resumesReserved >= next.budgets.maxResumes) { next.stage = "budget_exhausted"; return next; } next.budgets.resumesReserved++; }
-      next.effects[key] = { kind, state: "reserved", at };
+      if (kind === "resume") {
+        requireStage(next, "waiting_external", "needs_intervention");
+        if (Object.values(next.effects).some(e => e.kind === "resume" && e.resumeApplied === undefined)) throw new Error("Legacy resume effect requires operator reconciliation");
+        if (Object.values(next.effects).some(e => e.kind === "resume" && e.resumeApplied === false)) throw new Error("A resume effect is already reserved for this cycle");
+        if (next.budgets.resumesReserved >= next.budgets.maxResumes) { next.stage = "budget_exhausted"; return next; }
+        next.budgets.resumesReserved++;
+      }
+      next.effects[key] = { kind, state: "reserved", at, ...(kind === "resume" ? { resumeApplied: false } : {}) };
     } else if (action === "confirm") {
       const effect = next.effects[key]; if (!effect || effect.kind !== kind) throw new Error("Effect must be reserved first");
       if (effect.state !== "confirmed" && kind === "resume") next.budgets.resumesConfirmed++;
@@ -219,14 +276,22 @@ export function applyCommand(m: Mission, command: MissionCommand): Mission {
     } else throw new Error("action must be reserve or confirm");
   } else if (command.kind === "resume") {
     requireStage(next, "waiting_external", "needs_intervention");
-    if (next.budgets.resumesReserved >= next.budgets.maxResumes) { next.stage = "budget_exhausted"; next.pendingIssue = null; return next; }
-    next.budgets.resumesReserved++;
+    if (Object.values(next.effects).some(e => e.kind === "resume" && e.resumeApplied === undefined)) throw new Error("Legacy resume effect requires operator reconciliation");
+    const reservedEffect = Object.values(next.effects).find(e => e.kind === "resume" && e.resumeApplied === false);
+    if (!reservedEffect) {
+      if (next.budgets.resumesReserved >= next.budgets.maxResumes) { next.stage = "budget_exhausted"; next.pendingIssue = null; return next; }
+      next.budgets.resumesReserved++;
+    } else {
+      if (reservedEffect.state !== "confirmed") throw new Error("Reserved resume effect requires reconciliation receipt");
+      reservedEffect.resumeApplied = true;
+    }
     next.stage = "readiness";
     next.verdict = null;
     next.pendingIssue = issue(next, "coordinator", "readiness", "Reconcile external state, then gather fresh readiness evidence. Check reserved effects before retrying writes.");
   } else if (command.kind === "invalidate") {
     const reason = text(p.reason, "reason"), sourceRef = text(p.sourceRef, "sourceRef");
     const head = sha(p.headSha, "headSha"), base = sha(p.baseSha, "baseSha");
+    if ((next.stage === "context" || next.stage === "readiness") && next.verdict?.state === "waiting_external" && next.verdict.reasons.length === 1 && next.verdict.reasons[0] === `Invalidated: ${reason}` && next.verdict.headSha === head && next.verdict.baseSha === base && next.verdict.sourceRefs.length === 1 && next.verdict.sourceRefs[0] === sourceRef) return next;
     next.verdict = { state: "waiting_external", reasons: [`Invalidated: ${reason}`], headSha: head, baseSha: base, at, sourceRefs: [sourceRef] };
     if (head !== next.headSha || base !== next.baseSha) {
       next.headSha = head; next.baseSha = base; next.context = null; next.review = null; next.stage = "context";

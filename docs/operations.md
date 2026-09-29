@@ -47,6 +47,8 @@ node bin/pr-review.mjs status --api HOST_URL --company COMPANY_ID --workspace WO
 
 `start` creates or reuses one mission for the company, repository, and PR, and creates the first assigned Paperclip issue. The rights are independent: `--allow-modify`, `--allow-push`, `--allow-comment`, `--allow-resolve-threads`; each defaults to false. It does not itself read GitHub or push. The coordinator prepares versioned context, the reviewer reviews, the fixer records intent and corrects, then the reviewer performs the final independent pass. Their issue work is visible in Paperclip; the worker stores state and validates transitions.
 
+Readiness evidence must contain typed check, job, rule, approval, conversation, and test results. Its UTC `observedAt` must be no more than 10 minutes old and no more than one minute in the future when submitted. A malformed or stale payload cannot produce `verified_mergeable`. A resume effect can reserve the finite budget before `/resume`; that call consumes the existing reservation once. Reserve a resume effect only while the mission is `waiting_external` or `needs_intervention`.
+
 Use the mission API for inspection:
 
 ```bash
@@ -79,6 +81,7 @@ The portable JSON carries product/version, target Paperclip version and commit, 
 - Resource `defaultDrift`: inspect customized content against current source; explicit Paperclip editing is required to adopt new defaults while retaining customizations.
 - Workspace divergence: point `--workspace` at the current primary or resolve the binding in Paperclip; the installer will not replace it.
 - A reserved external push/comment/thread effect after timeout: read the remote state and record a receipt with `POST /missions/MISSION_ID/effects`; never repeat the write merely because its HTTP response was lost.
+- A pre-0.1.5 resume effect without `resumeApplied`: reconcile its history before another resume. The worker blocks an ambiguous legacy reservation rather than guessing whether its budget was already consumed.
 - `waiting_external`: obtain missing or pending checks, approvals, thread status, conflict state, and current base/head before retrying readiness.
 - `budget_exhausted`: stop automated work and obtain an operator decision. The mission does not reset budgets on restart or SHA change.
 - A `verified_mergeable` verdict is an agent attestation. Recheck current GitHub state externally before merging; this product never merges.

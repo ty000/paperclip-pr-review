@@ -30,4 +30,8 @@ describe("managed agent instruction layers", () => {
     expect(manifest.skills?.find(skill => skill.skillKey === "pr-review-code-review")?.markdown).toContain("/missions/{id}/review");
     expect(manifest.skills?.find(skill => skill.skillKey === "pr-review-remediation")?.markdown).toContain("/missions/{id}/intent");
   });
+
+  it("does not expose an unconditional managed skill reset route", () => {
+    expect(manifest.apiRoutes?.some(route => route.path === "/skills/default")).toBe(false);
+  });
 });

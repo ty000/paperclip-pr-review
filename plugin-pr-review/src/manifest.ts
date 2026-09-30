@@ -9,7 +9,7 @@ export const SKILL_KEYS = ["pr-review-workflow", "pr-review-coordination", "pr-r
 const manifest: PaperclipPluginManifestV1 = {
   id: PLUGIN_ID,
   apiVersion: 1,
-  version: "0.2.0",
+  version: "0.2.1",
   displayName: "Paperclip PR Review",
   description: "Visible, contextual PR review and remediation with durable readiness gates.",
   author: "Paperclip PR Review contributors",
@@ -37,7 +37,6 @@ const manifest: PaperclipPluginManifestV1 = {
   apiRoutes: [
     { routeKey: "setup", method: "POST", path: "/setup", auth: "board", capability: "api.routes.register", companyResolution: { from: "body", key: "companyId" } },
     { routeKey: "resources", method: "GET", path: "/resources", auth: "board", capability: "api.routes.register", companyResolution: { from: "query", key: "companyId" } },
-    { routeKey: "skill-default", method: "POST", path: "/skills/default", auth: "board", capability: "api.routes.register", companyResolution: { from: "body", key: "companyId" } },
     { routeKey: "start", method: "POST", path: "/missions", auth: "board", capability: "api.routes.register", companyResolution: { from: "body", key: "companyId" } },
     { routeKey: "list", method: "GET", path: "/missions", auth: "board-or-agent", capability: "api.routes.register", companyResolution: { from: "query", key: "companyId" } },
     { routeKey: "get", method: "GET", path: "/missions/:missionId", auth: "board-or-agent", capability: "api.routes.register", companyResolution: { from: "query", key: "companyId" } },

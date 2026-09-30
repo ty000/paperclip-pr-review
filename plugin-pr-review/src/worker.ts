@@ -30,26 +30,34 @@ async function setup(ctx: PluginContext, companyId: string) {
 async function closePhaseIssues(ctx: PluginContext, mission: Mission): Promise<Mission> {
   const keys = new Set(Object.keys(mission.issueIds));
   if (mission.closure?.pendingIssueKey) keys.add(mission.closure.pendingIssueKey);
+  let pendingIssueObserved = false;
   // Exact origin lookup also recovers creation that succeeded before its ledger write.
   for (const key of keys) {
     const originKind = `plugin:${PLUGIN_ID}:phase`;
     const originId = `${mission.id}:${key}`;
     const issues = await ctx.issues.list({ companyId: mission.companyId, originKind, originId, limit: 10 });
     if (issues.length > 1) throw new Error("Duplicate phase issues detected; operator reconciliation required");
+    if (key === mission.closure?.pendingIssueKey && issues.length === 1) pendingIssueObserved = true;
     for (const phaseIssue of issues) {
       const current = await ctx.issues.get(phaseIssue.id, mission.companyId);
       if (!current || current.originKind !== originKind || current.originId !== originId) throw new Error("Phase issue ownership changed during closure");
       if (current.status !== "done" && current.status !== "cancelled") {
         await ctx.issues.update(current.id, { status: "cancelled" }, mission.companyId);
+        const after = await ctx.issues.get(current.id, mission.companyId);
+        if (!after || !["done", "cancelled"].includes(after.status)) throw new Error("Phase cancellation could not be confirmed");
       }
     }
   }
   // A dispatch that already crossed the host boundary may still create its issue.
-  // Keep cleanup pending until its lease expires; a retry recovers by origin.
-  if (mission.closure?.dispatchLeaseUntil && Date.parse(mission.closure.dispatchLeaseUntil) > Date.now()) return mission;
+  // Lease expiry proves nothing about an outstanding host create. Keep unknown
+  // dispatches pending until the dispatcher settles or its exact issue is found.
+  if (mission.closure?.dispatchPending && !pendingIssueObserved) return mission;
   return new MissionStore(ctx.db).change(mission.companyId, mission.id, current => {
+    // A late dispatcher may have added an issue after our scan. Retry cleanup
+    // against that newer snapshot instead of certifying an uninspected issue.
+    if (current.version !== mission.version) return current;
     if (!current.closure || current.closure.issuesReconciled) return current;
-    return { ...current, closure: { ...current.closure, issuesReconciled: true } };
+    return { ...current, closure: { ...current.closure, dispatchPending: false, issuesReconciled: true } };
   });
 }
 
@@ -71,7 +79,14 @@ async function ensurePhaseIssue(ctx: PluginContext, mission: Mission): Promise<M
   const existing = await ctx.issues.list({ companyId: mission.companyId, originKind, originId, limit: 10 });
   if (existing.length > 1) throw new Error("Duplicate phase issues detected; operator reconciliation required");
   const latest = await store.get(mission.companyId, mission.id);
-  if (latest?.stage === "merged_externally") return closePhaseIssues(ctx, latest);
+  if (latest?.stage === "merged_externally") {
+    const settled = await store.change(mission.companyId, mission.id, current => {
+      if (!current.closure || current.closure.dispatchOwner !== owner) return current;
+      return { ...current, closure: { ...current.closure, dispatchPending: false } };
+    });
+    return closePhaseIssues(ctx, settled);
+  }
+  if (latest?.pendingIssue?.leaseOwner !== owner) return latest ?? claimed;
   let phaseIssue = existing[0];
   if (!phaseIssue) {
     const agent = await ctx.agents.managed.get(pending.role, mission.companyId);
@@ -85,7 +100,7 @@ async function ensurePhaseIssue(ctx: PluginContext, mission: Mission): Promise<M
     });
   }
   const updated = await store.change(mission.companyId, mission.id, current => {
-    if (current.stage === "merged_externally") return { ...current, closure: current.closure && { ...current.closure, issuesReconciled: false }, issueIds: { ...current.issueIds, [pending.key]: phaseIssue!.id } };
+    if (current.stage === "merged_externally") return { ...current, closure: current.closure && { ...current.closure, dispatchPending: current.closure.dispatchOwner === owner ? false : current.closure.dispatchPending, issuesReconciled: false }, issueIds: { ...current.issueIds, [pending.key]: phaseIssue!.id } };
     if (current.pendingIssue?.key !== pending.key || current.pendingIssue.leaseOwner !== owner) return current;
     return { ...current, rootIssueId: current.rootIssueId ?? phaseIssue!.id, pendingIssue: null, issueIds: { ...current.issueIds, [pending.key]: phaseIssue!.id } };
   });

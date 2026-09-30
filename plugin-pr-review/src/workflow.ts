@@ -42,7 +42,7 @@ export interface Mission {
   effects: Record<string, { kind: string; state: "reserved" | "confirmed"; at: string; receipt?: string; resumeApplied?: boolean }>;
   verdict: { state: Stage; reasons: string[]; headSha: string; baseSha: string; at: string; sourceRefs: string[] } | null;
   // Optional so previously persisted schemaVersion 1 missions remain readable.
-  closure?: { repository: string; prNumber: number; mergedAt: string; mergeCommitSha: string; observedAt: string; sourceRef: string; actorId: string; recordedAt: string; previousStage: Stage; pendingIssueKey: string | null; dispatchLeaseUntil: string | null; issuesReconciled: boolean };
+  closure?: { repository: string; prNumber: number; mergedAt: string; mergeCommitSha: string; observedAt: string; sourceRef: string; actorId: string; recordedAt: string; previousStage: Stage; pendingIssueKey: string | null; dispatchOwner: string | null; dispatchPending: boolean; issuesReconciled: boolean };
   createdAt: string; updatedAt: string; version: number;
 }
 export type MissionCommand = { kind: string; payload: Record<string, unknown>; actorId: string; at: string };
@@ -325,6 +325,6 @@ function closeMergedMission(m: Mission, command: MissionCommand): Mission {
   if (!Number.isFinite(age) || age > 600_000 || age < -60_000) throw new Error("Merge observation is stale or future-dated");
   return {
     ...structuredClone(m), stage: "merged_externally", pendingIssue: null, updatedAt: command.at,
-    closure: { repository: m.repository, prNumber: m.prNumber, mergedAt, mergeCommitSha, observedAt, sourceRef, actorId: command.actorId, recordedAt: command.at, previousStage: m.stage, pendingIssueKey: m.pendingIssue?.key ?? null, dispatchLeaseUntil: m.pendingIssue?.leaseUntil ?? null, issuesReconciled: false }
+    closure: { repository: m.repository, prNumber: m.prNumber, mergedAt, mergeCommitSha, observedAt, sourceRef, actorId: command.actorId, recordedAt: command.at, previousStage: m.stage, pendingIssueKey: m.pendingIssue?.key ?? null, dispatchOwner: m.pendingIssue?.leaseOwner ?? null, dispatchPending: Boolean(m.pendingIssue?.leaseOwner || m.pendingIssue?.leaseUntil), issuesReconciled: false }
   };
 }

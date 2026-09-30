@@ -68,3 +68,12 @@ simulated host/database: role authorization, scoped issue cancellation, cleanup
 failure/retry, orphan recovery and closure concurrent with phase dispatch.
 These are local automated checks, not proof of a deployed Paperclip lifecycle.
 The disposable host test also includes closure persistence and phase-issue readback.
+
+On 2026-09-30, version 0.2.1 passed 58 local tests, TypeScript checking and build.
+The disposable Paperclip host replay passed all 15 scenarios, including persisted
+merge closure, preservation of findings/budgets, cancellation readback and rejected
+late resume/invalidation. [Recorded result](merge-closure-host-result.json) includes
+the built worker/manifest hashes. The host used local_trusted mode and paused
+agents; this proves the worker/API/database path, not an authenticated agent run
+or an independently observed GitHub merge. Fallow was unavailable locally, so the
+optional static audit was skipped rather than reported as passing.

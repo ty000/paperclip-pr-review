@@ -1,0 +1,31 @@
+{
+  "result": "pass",
+  "host": "http://127.0.0.1:3311",
+  "companyId": "a803fac0-0312-44df-9bbe-e92323ab9bd8",
+  "missionId": "0e563659-ec88-4999-b227-265900ab0a8b",
+  "fixture": "/tmp/pr-review-host-fixture-rwo9pJ",
+  "baseSha": "7cd943a46154dd6295c3c5c4fda076c0fc1dac06",
+  "badSha": "2748c1d6ac48ee54905f51bbc3d7b1200c317104",
+  "fixedSha": "fa348a400e1eca8b02e969f3a5b2fd742f077015",
+  "outcomes": [
+    "concurrent triggers reuse one mission and phase issue",
+    "context hash is shared and stale head review rejected",
+    "duplicate observations retain one finding and both observations",
+    "external effect reservation survives retry without duplicate",
+    "real fixture commit corrects defect and confirms bounded attempt",
+    "readiness refused: red CI",
+    "readiness refused: pending CI",
+    "readiness refused: conflict",
+    "readiness refused: approval",
+    "readiness refused: unexplained job",
+    "independent final review and fresh evidence reached fixture readiness",
+    "host resume creates one coordinator issue and reserves a finite attempt",
+    "second resume after budget exhaustion stops explicitly",
+    "reobserved finding dispatches a new fixer issue",
+    "external merge closes lifecycle, preserves findings and cancels owned unfinished phases without redispatch"
+  ],
+  "pluginVersion": "0.2.1",
+  "workerSha256": "d07f5e6d2c37c62ab09731c26a9d1101a1f373368a847efdb1922472614dd154",
+  "manifestSha256": "ee8f5160d080a1d3a5094310325e90117665cbede7db805bb2b538392328efe5",
+  "boundary": "Disposable local_trusted Paperclip host, real worker/database/issues, simulated agent and merge observations; no GitHub writes or actual model execution."
+}

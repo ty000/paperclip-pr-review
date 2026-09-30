@@ -48,7 +48,7 @@ describe("external merge closure", () => {
     const m = mission();
     m.pendingIssue!.leaseUntil = "2026-09-30T04:00:30Z";
     const result = JSON.parse(JSON.stringify(close(m))) as Mission;
-    expect(result.closure).toMatchObject({ pendingIssueKey: "context-0", dispatchLeaseUntil: m.pendingIssue!.leaseUntil });
+    expect(result.closure).toMatchObject({ pendingIssueKey: "context-0", dispatchPending: true });
     expect(close(result)).toBe(result);
   });
 });

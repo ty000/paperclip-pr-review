@@ -43,7 +43,8 @@ Closure is persisted before cancelling owned unfinished phase issues. Exact
 origin keys, including the interrupted dispatch key, support cleanup retries;
 `closure.issuesReconciled` exposes partial cleanup. A concurrent dispatch checks
 for closure before creation and reconciles any issue created across that boundary.
-An active dispatch lease keeps cleanup pending. Completed phase issues remain
+An outstanding dispatch keeps cleanup pending regardless of lease expiry; a stale
+cleanup snapshot cannot certify a newer ledger version. Completed phase issues remain
 historical records; shared routine issues are completed by the coordinator after
 all missions have been inspected. Fully reconciled closed missions are skipped.
 This is not a transaction with GitHub: already-started external effects cannot be

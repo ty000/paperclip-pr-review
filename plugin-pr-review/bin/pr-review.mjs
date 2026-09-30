@@ -74,7 +74,8 @@ async function syncSkills() {
   if (Object.values(before).some(role => role.drift.length)) throw new Error("Managed skill content differs from the installed manifest; review and synchronize skill content before changing desired skills");
   if (Object.values(before).some(role => !role.supported)) throw new Error("An agent adapter does not support skill assignment");
   for (const role of Object.values(before)) {
-    if (!role.missing.length) continue;
+    if (!role.missing.length && role.states.every(selectedSkillState)) continue;
+    // An empty add retries adapter materialization without changing saved keys or pins.
     await request("POST", `/api/agents/${role.agentId}/skills/sync`, { mode: "add", desiredSkills: role.missing });
     const current = await request("GET", `/api/agents/${role.agentId}/skills`);
     if (role.missing.some(key => !current.desiredSkills?.includes(key))) throw new Error(`Skill selection for ${role.agentId} did not persist; inspect current state before retrying`);

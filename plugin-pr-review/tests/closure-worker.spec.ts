@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PluginContext, PluginApiRequestInput } from "@paperclipai/plugin-sdk";
 import { applyCommand, createMission, type Mission } from "../src/workflow.js";
@@ -20,6 +21,8 @@ const issues = {
     phaseIssues.push(created); return created;
   })
 };
+const managedSkillGet = vi.fn();
+const managedSkillReset = vi.fn();
 const ctx = {
   db: {
     namespace: "fixture",
@@ -30,7 +33,8 @@ const ctx = {
     }
   },
   issues,
-  agents: { managed: { get: async (role: string) => ({ agentId: role }) } },
+  skills: { managed: { get: managedSkillGet, reset: managedSkillReset } },
+  agents: { managed: { get: async (role: string) => ({ agentId: role, agent: { status: "idle" } }) } },
   projects: { managed: { get: async () => ({ projectId: "project" }) } }
 } as unknown as PluginContext;
 async function request(routeKey: string, body: Record<string, unknown>, agentId = "coordinator") {
@@ -89,8 +93,8 @@ describe("merge closure worker with simulated host", () => {
     expect(result.body.closure?.issuesReconciled).toBe(true);
     expect(phaseIssues.find(i => i.id === "orphan")?.status).toBe("cancelled");
   });
-  it("leaves cleanup pending during an active dispatch lease", async () => {
-    state.pendingIssue = { key: "in-flight", role: "reviewer", description: "review", leaseUntil: new Date(Date.now() + 60_000).toISOString() };
+  it.each([-60_000, 60_000])("leaves an unresolved dispatch pending regardless of lease age %s", async offset => {
+    state.pendingIssue = { key: "in-flight", role: "reviewer", description: "review", leaseUntil: new Date(Date.now() + offset).toISOString() };
     const result = await request("close", receipt());
     expect(result.body.closure?.issuesReconciled).toBe(false);
     expect(result.body.stage).toBe("merged_externally");
@@ -108,5 +112,32 @@ describe("merge closure worker with simulated host", () => {
     expect(state.pendingIssue).toBeNull();
     expect(phaseIssues.find(i => i.id === "racing-issue")?.status).toBe("cancelled");
     expect(Object.values(state.issueIds)).toContain("racing-issue");
+  });
+});
+
+
+describe("review regressions", () => {
+  it("does not mark a newer dispatch snapshot reconciled after a stale scan", async () => {
+    const originalList = async (input: { originKind: string; originId: string }) => phaseIssues.filter(i => i.originKind === input.originKind && i.originId === input.originId);
+    issues.list.mockImplementationOnce(originalList).mockImplementationOnce(async input => {
+      const result = await originalList(input);
+      phaseIssues.push({ id: "late", companyId, originKind, originId: `${state.id}:late`, status: "todo" });
+      state = { ...state, version: state.version + 1, issueIds: { ...state.issueIds, late: "late" }, closure: { ...state.closure!, issuesReconciled: false } };
+      return result;
+    });
+    const body = receipt();
+    expect((await request("close", body)).body.closure?.issuesReconciled).toBe(false);
+    expect(phaseIssues.find(i => i.id === "late")?.status).toBe("todo");
+    expect((await request("close", body)).body.closure?.issuesReconciled).toBe(true);
+    expect(phaseIssues.find(i => i.id === "late")?.status).toBe("cancelled");
+  });
+  it.each([null, { reason: "customized" }])("never replaces skill content through a non-atomic reset: %j", async drift => {
+    const markdown = "reviewed content";
+    const hash = createHash("sha256").update(markdown).digest("hex");
+    managedSkillGet.mockResolvedValue({ skillId: "skill", skill: { markdown, fileInventory: [{ path: "SKILL.md" }] }, defaultDrift: drift });
+    const result = await request("skill-default", { companyId, skillKey: "pr-review-workflow", expectedSkillId: "skill", expectedCurrentHash: hash });
+    if (drift) { expect(result.status).toBe(422); expect(result.body.error).toMatch(/Atomic.*unsupported/); }
+    else expect(result.body).toMatchObject({ changed: false, currentHash: hash });
+    expect(managedSkillReset).not.toHaveBeenCalled();
   });
 });

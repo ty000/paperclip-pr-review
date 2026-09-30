@@ -139,8 +139,10 @@ If cancellation fails, the mission remains terminal and the response reports an
 error. Read it back, then retry `/close` using the persisted closure receipt plus
 `merged: true`. Matching retries are accepted even after the original observation
 expires, without replacing its provenance. Conflicting merge receipts are rejected.
-While a prior dispatch lease is active, cleanup remains pending; retry after the
-lease expires. Origin lookups recover phase issues created before interruption.
+An outstanding dispatch keeps cleanup pending even after its lease expires.
+Retry when it settles or its exact-origin issue becomes observable. An interrupted
+dispatch with no observable outcome needs operator investigation; elapsed time
+does not prove that creation failed. Origin lookups recover created phase issues.
 The routine retries cleanup for closed missions with `issuesReconciled: false`,
 and skips fully reconciled closed missions. No new review cycle is started.
 

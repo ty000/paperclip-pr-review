@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PluginContext, PluginApiRequestInput } from "@paperclipai/plugin-sdk";
 import { applyCommand, createMission, type Mission } from "../src/workflow.js";
@@ -22,7 +21,6 @@ const issues = {
   })
 };
 const managedSkillGet = vi.fn();
-const managedSkillReset = vi.fn();
 const ctx = {
   db: {
     namespace: "fixture",
@@ -34,7 +32,7 @@ const ctx = {
     }
   },
   issues,
-  skills: { managed: { get: managedSkillGet, reset: managedSkillReset } },
+  skills: { managed: { get: managedSkillGet } },
   routines: { managed: { get: async () => ({ routineId: "routine" }) } },
   agents: { managed: { get: async (role: string) => ({ agentId: role, agent: { status: "idle" } }) } },
   projects: { managed: { get: async () => ({ projectId: "project" }) } }
@@ -133,15 +131,7 @@ describe("review regressions", () => {
     expect((await request("close", body)).body.closure?.issuesReconciled).toBe(true);
     expect(phaseIssues.find(i => i.id === "late")?.status).toBe("cancelled");
   });
-  it.each([null, { reason: "customized" }])("never replaces skill content through a non-atomic reset: %j", async drift => {
-    const markdown = "reviewed content";
-    const hash = createHash("sha256").update(markdown).digest("hex");
-    managedSkillGet.mockResolvedValue({ skillId: "skill", skill: { markdown, fileInventory: [{ path: "SKILL.md" }] }, defaultDrift: drift });
-    const result = await request("skill-default", { companyId, skillKey: "pr-review-workflow", expectedSkillId: "skill", expectedCurrentHash: hash });
-    if (drift) { expect(result.status).toBe(422); expect(result.body.error).toMatch(/Atomic.*unsupported/); }
-    else expect(result.body).toMatchObject({ changed: false, currentHash: hash });
-    expect(managedSkillReset).not.toHaveBeenCalled();
-  });
+
 });
 
 

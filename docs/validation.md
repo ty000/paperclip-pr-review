@@ -56,3 +56,15 @@ Both disposable hosts were stopped after readback. The table reports their obser
 ## Remaining proof boundary
 
 The current plugin trusts agent-submitted GitHub evidence. Its state machine can establish internal consistency and reject incomplete claims, but it cannot independently establish the current GitHub remote state. This blocks a product-level assertion that a real PR is **verified clean and mergeable**. The target PR, GitHub permissions, adapter credentials, and authorization for external actions were not supplied, and the run expressly prohibited real PR comments, pushes and merges. A later canary requires an explicit repository/PR, a disposable or approved branch, host credentials, separate modification/push/comment/thread permissions, and live readback of the GitHub state. The product never merges.
+
+## External merge closure checks
+
+`tests/closure.spec.ts` covers all pre-closure stages, malformed and stale evidence,
+identity mismatch, squash/rebase commit separation, preservation of findings,
+budgets and verdicts, delayed idempotent retries, conflicting receipts, JSON
+round-trips, and rejection of late workflow commands.
+`tests/closure-worker.spec.ts` exercises the real worker and mission store with a
+simulated host/database: role authorization, scoped issue cancellation, cleanup
+failure/retry, orphan recovery and closure concurrent with phase dispatch.
+These are local automated checks, not proof of a deployed Paperclip lifecycle.
+The disposable host test also includes closure persistence and phase-issue readback.

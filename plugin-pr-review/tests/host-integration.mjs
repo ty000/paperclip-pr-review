@@ -129,4 +129,23 @@ const fixerKeys = Object.keys(reopened.issueIds).filter(key => key.startsWith("f
 assert.equal(fixerKeys.length, 2);
 assert.notEqual(reopened.issueIds[fixerKeys[1]], firstFixerIssueId);
 outcomes.push("reobserved finding dispatches a new fixer issue");
+const closureBody = { repository, prNumber: reopened.prNumber, merged: true, mergedAt: new Date().toISOString(), mergeCommitSha: fixedSha, observedAt: new Date().toISOString(), sourceRef: "fixture:external-merge" };
+const beforeClosure = structuredClone(reopened);
+const closed = await post(`${reopenedRoute}/close`, closureBody);
+assert.equal(closed.stage, "merged_externally");
+assert.equal(closed.closure.issuesReconciled, true);
+assert.deepEqual(closed.findings, beforeClosure.findings);
+assert.deepEqual(closed.budgets, beforeClosure.budgets);
+for (const id of Object.values(closed.issueIds)) {
+  const phaseIssue = await request("GET", `/api/issues/${id}`);
+  assert.ok(["done", "cancelled"].includes(phaseIssue.status));
+}
+const repeatedClosure = await post(`${reopenedRoute}/close`, closureBody);
+assert.equal(repeatedClosure.version, closed.version);
+await post(`${reopenedRoute}/resume`, {}, 422);
+await post(`${reopenedRoute}/invalidate`, { baseSha, headSha: fixedSha, reason: "late event", sourceRef: "fixture:late" }, 422);
+const closedReadback = await request("GET", `${plugin}${reopenedRoute}?companyId=${companyId}`);
+assert.equal(closedReadback.stage, "merged_externally");
+assert.deepEqual(closedReadback.issueIds, closed.issueIds);
+outcomes.push("external merge closes lifecycle, preserves findings and cancels owned unfinished phases without redispatch");
 console.log(JSON.stringify({ result: "pass", host: api, companyId, missionId: mission.id, fixture: dir, baseSha, badSha, fixedSha, outcomes }, null, 2));

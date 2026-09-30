@@ -70,7 +70,7 @@ For a context refresh, POST `/missions/MISSION_ID/context` with `companyId`, `sc
 
 The fixer must record an intent before editing: POST `/missions/MISSION_ID/intent` with `companyId`, nonempty `findingIds` copied from open `mission.findings[].id`, and nonempty `defect`, `change`, and `expectedProof` strings. Confirm the mission reached `correction` and has `correctionIntent`. For an authorized GitHub push, reserve a stable `key` with POST `/missions/MISSION_ID/effects` using `kind: "push"` and `action: "reserve"`; after publication, read the remote head and confirm the same key with `action: "confirm"` and a `receipt` containing that SHA. POST `/missions/MISSION_ID/correction` with `companyId`, the new `headSha`, `summary`, passing `tests` entries (`name`, `passed: true`, `sourceRef`), and `publication` (`remoteHeadSha` equal to the new head, plus `sourceRef`). The correction route uses the finding IDs already stored in the intent. If intent fails, read the mission back and stop before editing or pushing until an intent is recorded.
 
-For a mission in `waiting_external` or `needs_intervention`, first compare live base/head and reconcile any reserved external effect. Then run:
+First observe the PR merge state and apply the closure procedure below if merged. Only for an unmerged PR in `waiting_external` or `needs_intervention`, compare live base/head and reconcile any reserved external effect. Then run:
 
 ```bash
 node bin/pr-review.mjs resume --api HOST_URL --company COMPANY_ID --mission MISSION_ID
@@ -99,3 +99,62 @@ The portable JSON carries product/version, target Paperclip version and commit, 
 - `waiting_external`: obtain missing or pending checks, approvals, thread status, conflict state, and current base/head before retrying readiness.
 - `budget_exhausted`: stop automated work and obtain an operator decision. The mission does not reset budgets on restart or SHA change.
 - A `verified_mergeable` verdict is an agent attestation. Recheck current GitHub state externally before merging; this product never merges.
+
+## Close a mission after an external merge
+
+Before context preparation, ref invalidation, readiness or resume, the coordinator
+checks GitHub's merge state for the mission repository and PR. This includes
+missions in `budget_exhausted` and `verified_mergeable`. A closed PR without a
+confirmed merge is insufficient. Unknown or missing evidence stops this check.
+
+Submit `POST /api/plugins/ty000.plugin-pr-review/api/missions/MISSION_ID/close`:
+
+```json
+{
+  "companyId": "COMPANY_ID",
+  "repository": "OWNER/REPO",
+  "prNumber": 123,
+  "merged": true,
+  "mergedAt": "2026-09-30T10:00:00Z",
+  "mergeCommitSha": "0123456789abcdef0123456789abcdef01234567",
+  "observedAt": "2026-09-30T10:01:00Z",
+  "sourceRef": "https://api.github.com/repos/OWNER/REPO/pulls/123"
+}
+```
+
+Replace all example values with observations. `observedAt` must be UTC, at most
+10 minutes old and at most one minute in the future; `mergedAt` cannot follow it.
+The repository and numeric PR identity must match the mission. The merge commit
+is recorded separately from the reviewed head, accommodating squash and rebase.
+Only the managed coordinator or an authorized board actor may submit closure.
+
+Read back `stage: merged_externally` and `closure.issuesReconciled: true`. Closure
+preserves the last review verdict, findings, review refs, budgets and uncertain
+effects; it does not certify readiness or resolve findings. It clears pending
+phase dispatch and cancels unfinished phase issues owned by this mission, leaving
+done/cancelled issues and unrelated issues unchanged. The coordinator finishes a
+shared routine issue only after processing its other missions.
+
+If cancellation fails, the mission remains terminal and the response reports an
+error. Read it back, then retry `/close` using the persisted closure receipt plus
+`merged: true`. Matching retries are accepted even after the original observation
+expires, without replacing its provenance. Conflicting merge receipts are rejected.
+While a prior dispatch lease is active, cleanup remains pending; retry after the
+lease expires. Origin lookups recover phase issues created before interruption.
+The routine retries cleanup for closed missions with `issuesReconciled: false`,
+and skips fully reconciled closed missions. No new review cycle is started.
+
+All review commands, effects, invalidation and resume are rejected after closure.
+Agents must refetch before edits or external writes and stop on the terminal
+state. This cannot revoke a GitHub write already in flight; reserved effects
+remain visible for operator investigation rather than being reported as successful.
+The worker validates the submitted observation, but does not independently query
+GitHub; the receipt remains an agent/operator attestation.
+
+For an existing installation, upgrade the package and review the added
+`issues.update` capability. Apply the new role charters, shared workflow and coordinator skills,
+and routine description explicitly where managed defaults show drift; an upgrade
+does not overwrite customized resources. Verify their installed content and worker
+health before expecting the routine to use the new route. Older mission JSON
+remains readable without a data migration; historical missions are closed only
+after an observed merge is submitted.

@@ -1,13 +1,15 @@
 import type { PaperclipPluginManifestV1 } from "@paperclipai/plugin-sdk";
-import { coordinatorInstructions, reviewerInstructions, fixerInstructions, workflowSkill } from "./templates.js";
+import { coordinatorInstructions, reviewerInstructions, fixerInstructions } from "./templates.js";
+import { workflowSkill, coordinatorSkill, reviewerSkill, fixerSkill } from "./skills.js";
 
 export const PLUGIN_ID = "ty000.plugin-pr-review";
 export const ROLES = ["coordinator", "reviewer", "fixer"] as const;
+export const SKILL_KEYS = ["pr-review-workflow", "pr-review-coordination", "pr-review-code-review", "pr-review-remediation"] as const;
 
 const manifest: PaperclipPluginManifestV1 = {
   id: PLUGIN_ID,
   apiVersion: 1,
-  version: "0.1.8",
+  version: "0.2.0",
   displayName: "Paperclip PR Review",
   description: "Visible, contextual PR review and remediation with durable readiness gates.",
   author: "Paperclip PR Review contributors",
@@ -20,16 +22,22 @@ const manifest: PaperclipPluginManifestV1 = {
   entrypoints: { worker: "./dist/worker.js" },
   database: { namespaceSlug: "pr_review", migrationsDir: "migrations", coreReadTables: ["companies"] },
   agents: [
-    { agentKey: "coordinator", displayName: "PR Review Coordinator", role: "manager", title: "PR review coordinator", capabilities: "Builds shared context, consolidates findings, and checks readiness.", adapterPreference: ["codex_local", "claude_local", "opencode_local", "process"], status: "paused", instructions: { content: coordinatorInstructions } },
-    { agentKey: "reviewer", displayName: "PR Independent Reviewer", role: "engineer", title: "Independent PR reviewer", capabilities: "Reviews the pinned diff and validates corrections independently.", adapterPreference: ["codex_local", "claude_local", "opencode_local", "process"], status: "paused", instructions: { content: reviewerInstructions } },
-    { agentKey: "fixer", displayName: "PR Remediator", role: "engineer", title: "PR correction engineer", capabilities: "Plans, changes, tests, and publishes approved corrections.", adapterPreference: ["codex_local", "claude_local", "opencode_local", "process"], status: "paused", instructions: { content: fixerInstructions } }
+    { agentKey: "coordinator", displayName: "PR Review Coordinator", role: "manager", title: "PR review coordinator", capabilities: "Builds shared context, consolidates findings, and checks readiness.", adapterPreference: ["codex_local", "claude_local", "opencode_local", "process"], status: "paused", instructions: { entryFile: "AGENTS.md", content: coordinatorInstructions } },
+    { agentKey: "reviewer", displayName: "PR Independent Reviewer", role: "engineer", title: "Independent PR reviewer", capabilities: "Reviews the pinned diff and validates corrections independently.", adapterPreference: ["codex_local", "claude_local", "opencode_local", "process"], status: "paused", instructions: { entryFile: "AGENTS.md", content: reviewerInstructions } },
+    { agentKey: "fixer", displayName: "PR Remediator", role: "engineer", title: "PR correction engineer", capabilities: "Plans, changes, tests, and publishes approved corrections.", adapterPreference: ["codex_local", "claude_local", "opencode_local", "process"], status: "paused", instructions: { entryFile: "AGENTS.md", content: fixerInstructions } }
   ],
   projects: [{ projectKey: "pr-review", displayName: "PR Reviews", description: "Visible review and remediation missions managed by Paperclip PR Review.", status: "in_progress" }],
-  skills: [{ skillKey: "pr-review-workflow", displayName: "PR Review Workflow", slug: "pr-review-workflow", description: "Context and evidence contract for the PR review team.", markdown: workflowSkill }],
+  skills: [
+    { skillKey: "pr-review-workflow", displayName: "PR Review Workflow", slug: "pr-review-workflow", description: "Shared mission and evidence contract for the PR review team.", markdown: workflowSkill },
+    { skillKey: "pr-review-coordination", displayName: "PR Review Coordination", slug: "pr-review-coordination", description: "Context, handoff, recovery, and readiness method for the coordinator.", markdown: coordinatorSkill },
+    { skillKey: "pr-review-code-review", displayName: "PR Review Code Review", slug: "pr-review-code-review", description: "Independent contextual review and correction validation method.", markdown: reviewerSkill },
+    { skillKey: "pr-review-remediation", displayName: "PR Review Remediation", slug: "pr-review-remediation", description: "Intent, correction, test, and publication method for the remediator.", markdown: fixerSkill }
+  ],
   routines: [{ routineKey: "resume-missions", title: "Resume PR review missions", description: "List missions through GET /api/plugins/ty000.plugin-pr-review/api/missions?companyId=..., compare current GitHub base/head and invalidate moved refs, then POST /missions/{id}/resume only for waiting_external or needs_intervention missions after uncertain external effects have been reconciled. Never reset budgets. Close this routine issue after recording actions and blockers.", assigneeRef: { resourceKind: "agent", resourceKey: "coordinator" }, projectRef: { resourceKind: "project", resourceKey: "pr-review" }, status: "paused", concurrencyPolicy: "skip_if_active", triggers: [{ kind: "schedule", label: "Mission reconciliation", cronExpression: "*/15 * * * *", timezone: "UTC", enabled: false, signingMode: null, replayWindowSec: null }] }],
   apiRoutes: [
     { routeKey: "setup", method: "POST", path: "/setup", auth: "board", capability: "api.routes.register", companyResolution: { from: "body", key: "companyId" } },
     { routeKey: "resources", method: "GET", path: "/resources", auth: "board", capability: "api.routes.register", companyResolution: { from: "query", key: "companyId" } },
+    { routeKey: "skill-default", method: "POST", path: "/skills/default", auth: "board", capability: "api.routes.register", companyResolution: { from: "body", key: "companyId" } },
     { routeKey: "start", method: "POST", path: "/missions", auth: "board", capability: "api.routes.register", companyResolution: { from: "body", key: "companyId" } },
     { routeKey: "list", method: "GET", path: "/missions", auth: "board-or-agent", capability: "api.routes.register", companyResolution: { from: "query", key: "companyId" } },
     { routeKey: "get", method: "GET", path: "/missions/:missionId", auth: "board-or-agent", capability: "api.routes.register", companyResolution: { from: "query", key: "companyId" } },

@@ -20,23 +20,37 @@ node bin/pr-review.mjs status --api HOST_URL --company COMPANY_ID --workspace WO
 
 `plan` is read only and reports package, plugin, resource, workspace, and lifecycle states. `install` installs a local path plugin, reconciles resources by stable keys, then binds a primary workspace. It can be rerun after interruption. Managed resource reconciliation preserves changed agent instructions and titles; inspect `defaultDrift` in `status` after an upgrade. Review and explicitly apply desired template updates in Paperclip. Do not assume that `update` overwrites customized resources.
 
+The 0.2.0 manifest declares the shared `pr-review-workflow` skill plus `pr-review-coordination`, `pr-review-code-review`, and `pr-review-remediation`. The CLI reports each managed skill ID and drift. Neither installation nor setup selects the skills for an agent. See [agent and skill migration](agent-skill-migration.md) before changing an existing company.
+
 After editing or pulling new sources, run `pnpm install --frozen-lockfile`, `pnpm typecheck`, `pnpm test`, `pnpm build`, and:
 
 ```bash
 node bin/pr-review.mjs update --api HOST_URL --company COMPANY_ID --workspace WORKSPACE --instance INSTANCE --commit HOST_COMMIT
 ```
 
-The update calls Paperclip's plugin upgrade API when the package version changed and reconciles owned resources. It does not migrate another company's data or reset its configuration. Inspect `status` before and after.
+The update calls Paperclip's plugin upgrade API when the package version changed and reconciles owned resources. It does not migrate another company's data, reset its configuration, overwrite existing `AGENTS.md` bundles, or apply changed skill content to an existing managed skill. Inspect `status` and `skillDrift` before and after. An existing company needs a reviewed content migration and explicit skill assignment.
 
 ## Configure and activate
 
 ```bash
 node bin/pr-review.mjs configure --api HOST_URL --company COMPANY_ID --adapter ADAPTER_TYPE --model MODEL_ID
+node bin/pr-review.mjs skills-plan --api HOST_URL --company COMPANY_ID
+node bin/pr-review.mjs sync-skills --api HOST_URL --company COMPANY_ID
 node bin/pr-review.mjs status --api HOST_URL --company COMPANY_ID --workspace WORKSPACE
 node bin/pr-review.mjs activate --api HOST_URL --company COMPANY_ID --bindings-verified true
 ```
 
 `configure` can target a subset with `--roles coordinator,reviewer`. It validates that the adapter is loaded and the model appears in the company model list. It preserves other agent fields. `activate` resumes the three agents and enables the 15-minute reconciliation schedule after the operator asserts that workspace, GitHub, model credentials, and permissions have been checked. It is intentionally a separate step; installation does not enable automatic triggers.
+
+`skills-plan` reads each agent's actual desired list and skill snapshot. `sync-skills` adds only the shared and role-specific managed skill keys missing from each agent; it refuses a running agent and reads back each change. It preserves unrelated desired skills. A sync response does not prove mounting in the next Codex run. `activate` now requires all expected keys selected and no missing/stale snapshot state. For an existing agent, first ensure the new skill content is installed and the current bundle has been reviewed; never cut over an active mission in the middle of a run.
+
+If `skills-plan` reports managed skill drift, compare the actual skill content with the manifest and preserve operator edits. For a reviewed one-file skill that should adopt the package default, use its exact reported skill ID and current SHA-256:
+
+```bash
+node bin/pr-review.mjs sync-skill-default --api HOST_URL --company COMPANY_ID --skill SKILL_KEY --expected-skill-id SKILL_ID --expected-hash CURRENT_SHA256
+```
+
+This board-only route checks the binding, current hash, file inventory and idle/paused state of all three agents before resetting that one managed skill. It reads back the result and requires no drift. It never resets an agent bundle or all skills at once. A custom skill or an uncertain write needs a reviewed targeted recovery, not an automatic retry.
 
 ## Start and follow a review
 

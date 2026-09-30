@@ -1,6 +1,6 @@
 # Paperclip PR Review
 
-Paperclip PR Review is a local Paperclip plugin for contextual pull request review and remediation. It installs three visible Paperclip agents, a project, a skill, and a paused reconciliation routine. A durable mission ledger pins the review context and findings to the PR base and head. It never merges a PR.
+Paperclip PR Review is a local Paperclip plugin for contextual pull request review and remediation. It declares three visible Paperclip agents, a project, four skills, and a paused reconciliation routine. Each agent has a role charter in its materialized `AGENTS.md`; skill selection and synchronization are explicit installation steps. A durable mission ledger pins the review context and findings to the PR base and head. It never merges a PR.
 
 ## Quick start
 

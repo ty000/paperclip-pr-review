@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { roleSkillKeys } from "./skill-bindings.mjs";
 
 const pluginPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const pluginKey = "ty000.plugin-pr-review";
@@ -25,6 +27,8 @@ async function request(method, route, body) {
 }
 const route = (suffix) => `/api/plugins/${pluginKey}/api${suffix}`;
 const show = (value) => console.log(JSON.stringify(value, null, 2));
+const sha256 = (value) => createHash("sha256").update(value).digest("hex");
+const selectedSkillState = (entry) => ["configured", "installed"].includes(entry.state);
 async function target() {
   if (!api) throw new Error("--api is required");
   if (!companyId) throw new Error("--company is required");
@@ -44,6 +48,53 @@ async function workspaceStatus(projectId, expected) {
   const match = expected && workspaces.find(w => w.cwd === expected || w.repoUrl === expected) || null;
   return { workspaces, primary, match };
 }
+async function skillAssignmentPlan(installed) {
+  const result = {};
+  for (const [role, skillKeys] of Object.entries(roleSkillKeys)) {
+    const agent = installed.agents?.[role];
+    if (!agent?.agentId) throw new Error(`Managed ${role} agent is missing`);
+    const drift = skillKeys.filter(key => installed.skills?.[key]?.defaultDrift);
+    const required = skillKeys.map(key => {
+      const skill = installed.skills?.[key];
+      if (!skill?.skillId || typeof skill.skill?.key !== "string") throw new Error(`Managed skill ${key} is not installed; run update/setup before selecting skills`);
+      return skill.skill.key;
+    });
+    const snapshot = await request("GET", `/api/agents/${agent.agentId}/skills`);
+    result[role] = { agentId: agent.agentId, status: agent.agent?.status, required, drift, desired: snapshot.desiredSkills ?? [], missing: required.filter(key => !snapshot.desiredSkills?.includes(key)), supported: snapshot.supported, mode: snapshot.mode, warnings: snapshot.warnings ?? [], states: required.map(key => ({ key, state: snapshot.entries?.find(entry => entry.key === key)?.state ?? "unknown" })) };
+  }
+  return result;
+}
+function managedSkillSummaries(installed) {
+  return Object.fromEntries(Object.entries(installed.skills ?? {}).map(([key, resource]) => [key, { skillId: resource.skillId, currentHash: typeof resource.skill?.markdown === "string" ? sha256(resource.skill.markdown) : null, drift: resource.defaultDrift }]));
+}
+async function syncSkillDefault() {
+  await target();
+  const key = required("skill");
+  const expectedSkillId = required("expected-skill-id");
+  const expectedCurrentHash = required("expected-hash");
+  const before = (await resources()).skills?.[key];
+  if (before?.skillId !== expectedSkillId || typeof before.skill?.markdown !== "string" || sha256(before.skill.markdown) !== expectedCurrentHash) throw new Error("Managed skill changed since the reviewed snapshot");
+  const result = await request("POST", route("/skills/default"), { companyId, skillKey: key, expectedSkillId, expectedCurrentHash });
+  const after = (await resources()).skills?.[key];
+  if (after?.skillId !== expectedSkillId || after.defaultDrift || sha256(after.skill?.markdown ?? "") !== result.currentHash) throw new Error("Skill default write has uncertain or incomplete readback; inspect before retrying");
+  return { result, after: managedSkillSummaries({ skills: { [key]: after } })[key] };
+}
+async function syncSkills() {
+  await target();
+  const before = await skillAssignmentPlan(await resources());
+  if (Object.values(before).some(role => !["idle", "paused"].includes(role.status))) throw new Error("An agent is running or unavailable; wait for a safe cutover before changing desired skills");
+  if (Object.values(before).some(role => role.drift.length)) throw new Error("Managed skill content differs from the installed manifest; review and synchronize skill content before changing desired skills");
+  if (Object.values(before).some(role => !role.supported)) throw new Error("An agent adapter does not support skill assignment");
+  for (const role of Object.values(before)) {
+    if (!role.missing.length) continue;
+    await request("POST", `/api/agents/${role.agentId}/skills/sync`, { mode: "add", desiredSkills: role.missing });
+    const current = await request("GET", `/api/agents/${role.agentId}/skills`);
+    if (role.missing.some(key => !current.desiredSkills?.includes(key))) throw new Error(`Skill selection for ${role.agentId} did not persist; inspect current state before retrying`);
+  }
+  const after = await skillAssignmentPlan(await resources());
+  if (Object.values(after).some(role => role.missing.length || role.states.some(entry => !selectedSkillState(entry)))) throw new Error("Skill selection is partial or stale; inspect agent skills before activating");
+  return { before, after };
+}
 async function plan() {
   const identity = await target();
   const plugin = await pluginRecord();
@@ -54,12 +105,15 @@ async function plan() {
   const pluginHealth = plugin?.status === "ready" ? await request("GET", `/api/plugins/${plugin.id}/health`).catch(() => null) : null;
   const localPackage = JSON.parse(await fs.readFile(path.join(pluginPath, "package.json"), "utf8"));
   const agentValues = Object.values(installed?.agents ?? {});
+  const skillsInstalled = Object.keys(installed?.skills ?? {}).length === 4 && Object.values(installed.skills).every(skill => skill.skillId);
+  const assignment = skillsInstalled ? await skillAssignmentPlan(installed) : null;
+  const skillsSelected = Boolean(assignment && Object.values(assignment).every(role => role.supported && !role.missing.length && !role.drift.length && role.states.every(selectedSkillState)));
   return { target: identity, plugin: plugin ? { id: plugin.id, version: plugin.version, status: plugin.status, lastError: plugin.lastError } : null,
-    resources: installed ? { projectId: installed.project.projectId, skillId: installed.skill.skillId, routineId: installed.routine.routineId, agents: Object.fromEntries(Object.entries(installed.agents).map(([k,v]) => [k, { id: v.agentId, adapterType: v.agent?.adapterType, model: v.agent?.adapterConfig?.model ?? null, status: v.agent?.status, drift: v.defaultDrift }])) } : null,
+    resources: installed ? { projectId: installed.project.projectId, skills: managedSkillSummaries(installed), routineId: installed.routine.routineId, agents: Object.fromEntries(Object.entries(installed.agents).map(([k,v]) => [k, { id: v.agentId, adapterType: v.agent?.adapterType, model: v.agent?.adapterConfig?.model ?? null, status: v.agent?.status, drift: v.defaultDrift }])) } : null,
     workspace: workspace && { primary: workspace.primary, requestedMatch: workspace.match },
-    lifecycle: { packageBuilt: Boolean(await fs.stat(path.join(pluginPath, "dist/worker.js")).catch(() => null)), installed: Boolean(plugin), loaded: plugin?.status === "ready" && Boolean(pluginHealth), resourcesInstalled: Boolean(installed?.project?.projectId && installed?.skill?.skillId && installed?.routine?.routineId && agentValues.length === 3 && agentValues.every(a => a.agentId)), configured: Boolean(workspace?.primary && agentValues.length === 3 && agentValues.every(a => a.agent?.adapterType !== "process" && typeof a.agent?.adapterConfig?.model === "string")), activated: Boolean(agentValues.length === 3 && agentValues.every(a => a.agent?.status === "idle") && installed?.routine?.routine?.status === "active" && triggers.some(t => t.kind === "schedule" && t.enabled)), realReviewExecuted: missions.some(m => m.mode === "github" && m.review), fixtureReviewExecuted: missions.some(m => m.mode === "fixture" && m.review) },
+    lifecycle: { packageBuilt: Boolean(await fs.stat(path.join(pluginPath, "dist/worker.js")).catch(() => null)), installed: Boolean(plugin), loaded: plugin?.status === "ready" && pluginHealth?.status === "ok", resourcesInstalled: Boolean(installed?.project?.projectId && skillsInstalled && installed?.routine?.routineId && agentValues.length === 3 && agentValues.every(a => a.agentId)), configured: Boolean(workspace?.primary && agentValues.length === 3 && agentValues.every(a => a.agent?.adapterType !== "process" && typeof a.agent?.adapterConfig?.model === "string")), skillsSelected, activated: Boolean(skillsSelected && agentValues.length === 3 && agentValues.every(a => a.agent?.status === "idle") && installed?.routine?.routine?.status === "active" && triggers.some(t => t.kind === "schedule" && t.enabled)), realReviewExecuted: missions.some(m => m.mode === "github" && m.review), fixtureReviewExecuted: missions.some(m => m.mode === "fixture" && m.review) },
     sourceVersion: localPackage.version,
-    action: !plugin ? "install-plugin" : plugin.status !== "ready" ? "repair-plugin" : !installed?.project?.projectId ? "reconcile-resources" : !workspace?.primary || options.workspace && !workspace.match ? "bind-workspace" : "none" };
+    action: !plugin ? "install-plugin" : plugin.status !== "ready" ? "repair-plugin" : plugin.version !== localPackage.version ? "upgrade-plugin" : !installed?.project?.projectId || !skillsInstalled ? "reconcile-resources" : !workspace?.primary || options.workspace && !workspace.match ? "bind-workspace" : "none" };
 }
 async function install(update = false) {
   const before = await plan();
@@ -74,7 +128,7 @@ async function install(update = false) {
     if (upgraded.status !== "ready") throw new Error(`Upgrade requires operator action: ${upgraded.status}: ${upgraded.lastError ?? ""}`);
   }
   const result = await request("POST", route("/setup"), { companyId });
-  if (!result.project?.projectId || !result.skill?.skillId || !result.routine?.routineId || Object.values(result.agents ?? {}).some(a => !a.agentId)) throw new Error("Resource reconcile was incomplete");
+  if (!result.project?.projectId || Object.keys(result.skills ?? {}).length !== 4 || Object.values(result.skills).some(s => !s.skillId) || !result.routine?.routineId || Object.values(result.agents ?? {}).some(a => !a.agentId)) throw new Error("Resource reconcile was incomplete");
   if (options.workspace) {
     const expected = options.workspace;
     const status = await workspaceStatus(result.project.projectId, expected);
@@ -102,6 +156,8 @@ async function activate() {
   if (!ws.primary) throw new Error("Primary workspace binding missing");
   const agents = Object.values(r.agents ?? {});
   if (agents.length !== 3 || agents.some(a => !a.agentId || !a.agent || a.agent.adapterType === "process")) throw new Error("Configure a runnable adapter and model/credentials for all three agents before activation");
+  const skillPlan = await skillAssignmentPlan(r);
+  if (Object.values(skillPlan).some(role => role.missing.length || role.drift.length || !role.supported || role.states.some(entry => !selectedSkillState(entry)))) throw new Error("Synchronize managed skill content and select role skills before activating agents");
   for (const agent of agents) if (agent.agent.status === "paused") await request("POST", `/api/agents/${agent.agentId}/resume`, {});
   const routine = await request("PATCH", `/api/routines/${r.routine.routineId}`, { status: "active" });
   const triggers = (await request("GET", `/api/routines/${r.routine.routineId}`)).triggers ?? [];
@@ -129,17 +185,20 @@ async function configure() { return configureSelection(required("adapter"), requ
 async function portableExport() {
   const p = await plan();
   if (!p.plugin || !p.resources) throw new Error("Install before exporting");
-  const data = { schemaVersion: 1, product: pluginKey, version: p.plugin.version, paperclip: { version: p.target.hostVersion, commit: p.target.hostCommit }, resources: { agentKeys: ["coordinator", "reviewer", "fixer"], projectKey: "pr-review", routineKey: "resume-missions", skillKey: "pr-review-workflow" }, adapters: Object.fromEntries(Object.entries(p.resources.agents).map(([k,v]) => [k, { type: v.adapterType, model: v.model }])), workspace: p.workspace?.primary?.repoUrl ? { repoUrl: p.workspace.primary.repoUrl } : { inputRequired: "workspace path or repository URL" }, excluded: ["credentials", "secret references", "local paths", "company and instance IDs", "issues", "mission state", "run history"] };
+  const data = { schemaVersion: 1, product: pluginKey, version: p.plugin.version, paperclip: { version: p.target.hostVersion, commit: p.target.hostCommit }, resources: { agentKeys: ["coordinator", "reviewer", "fixer"], projectKey: "pr-review", routineKey: "resume-missions", skillKeys: Object.keys(p.resources.skills) }, adapters: Object.fromEntries(Object.entries(p.resources.agents).map(([k,v]) => [k, { type: v.adapterType, model: v.model }])), workspace: p.workspace?.primary?.repoUrl ? { repoUrl: p.workspace.primary.repoUrl } : { inputRequired: "workspace path or repository URL" }, excluded: ["credentials", "secret references", "local paths", "company and instance IDs", "issues", "mission state", "run history"] };
   if (options.out) await fs.writeFile(options.out, JSON.stringify(data, null, 2) + "\n");
   return data;
 }
 
 try {
-  if (!["plan", "install", "status", "update", "configure", "activate", "export", "diff", "start", "resume"].includes(command)) throw new Error("Usage: pr-review <plan|install|status|update|configure|activate|export|diff|start|resume> --api URL --company ID [--workspace PATH|URL] [--instance NAME]");
+  if (!["plan", "install", "status", "update", "configure", "skills-plan", "sync-skill-default", "sync-skills", "activate", "export", "diff", "start", "resume"].includes(command)) throw new Error("Usage: pr-review <plan|install|status|update|configure|skills-plan|sync-skill-default|sync-skills|activate|export|diff|start|resume> --api URL --company ID [--workspace PATH|URL] [--instance NAME]");
   if (command === "plan" || command === "status") show(await plan());
   else if (command === "install" || command === "update") show(await install(command === "update"));
   else if (command === "activate") show(await activate());
   else if (command === "configure") show(await configure());
+  else if (command === "skills-plan") { await target(); const installed = await resources(); show({ skills: managedSkillSummaries(installed), agents: await skillAssignmentPlan(installed) }); }
+  else if (command === "sync-skill-default") show(await syncSkillDefault());
+  else if (command === "sync-skills") show(await syncSkills());
   else if (command === "export") show(await portableExport());
   else if (command === "diff") {
     const actual = await portableExport(); const source = JSON.parse(await fs.readFile(required("from"), "utf8"));

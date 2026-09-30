@@ -2,11 +2,11 @@
   "result": "pass",
   "host": "http://127.0.0.1:3311",
   "companyId": "a803fac0-0312-44df-9bbe-e92323ab9bd8",
-  "missionId": "8cc161ca-fc51-4f0d-b3bb-59bf3a9cf7d1",
-  "fixture": "/tmp/pr-review-host-fixture-OXv3ph",
-  "baseSha": "3ca06aac434056bc157e9ba3487f67639cf1063b",
-  "badSha": "f951f1ef3f6ab3f0a3c29b395bbb35e0ebc46131",
-  "fixedSha": "0e102436ce6e0358c53aa63842908a8c2b4638a5",
+  "missionId": "a9c07c18-009c-4fef-a732-6ba8525aa38f",
+  "fixture": "/tmp/pr-review-host-fixture-ulx8Zq",
+  "baseSha": "7030c9c098825ed61371fb6606823cf628a1925c",
+  "badSha": "0666f02504c4446767a43fc35f672cd7f71f9bdc",
+  "fixedSha": "c037ff42a83a272d558e423597d6c60214d8efaf",
   "outcomes": [
     "concurrent triggers reuse one mission and phase issue",
     "context hash is shared and stale head review rejected",
@@ -24,8 +24,8 @@
     "reobserved finding dispatches a new fixer issue",
     "external merge closes lifecycle, preserves findings and cancels owned unfinished phases without redispatch"
   ],
-  "pluginVersion": "0.2.1",
-  "workerSha256": "b7feb299fbd3cbf4ec96ec19f9fcc8fcbe906b7d21163f9333ce61b262b4b918",
-  "manifestSha256": "ee8f5160d080a1d3a5094310325e90117665cbede7db805bb2b538392328efe5",
+  "pluginVersion": "0.2.2",
+  "workerSha256": "a93daf9383d23383a31f5381ea197b58988ad622bc27bc152cca61a3f4b18816",
+  "manifestSha256": "d771de368f91d8740d0c205da6dbda05cabec9ae1841ab13442ad476f82b873f",
   "boundary": "Disposable local_trusted Paperclip host, real worker/database/issues, simulated agent and merge observations; no GitHub writes or actual model execution."
 }

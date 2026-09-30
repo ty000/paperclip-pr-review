@@ -9,7 +9,7 @@ export const SKILL_KEYS = ["pr-review-workflow", "pr-review-coordination", "pr-r
 const manifest: PaperclipPluginManifestV1 = {
   id: PLUGIN_ID,
   apiVersion: 1,
-  version: "0.2.1",
+  version: "0.2.2",
   displayName: "Paperclip PR Review",
   description: "Visible, contextual PR review and remediation with durable readiness gates.",
   author: "Paperclip PR Review contributors",

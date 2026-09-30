@@ -69,7 +69,7 @@ failure/retry, orphan recovery and closure concurrent with phase dispatch.
 These are local automated checks, not proof of a deployed Paperclip lifecycle.
 The disposable host test also includes closure persistence and phase-issue readback.
 
-On 2026-09-30, version 0.2.1 passed 58 local tests, TypeScript checking and build.
+On 2026-09-30, version 0.2.1 passed 60 local tests, TypeScript checking and build.
 The disposable Paperclip host replay passed all 15 scenarios, including persisted
 merge closure, preservation of findings/budgets, cancellation readback and rejected
 late resume/invalidation. [Recorded result](merge-closure-host-result.json) includes

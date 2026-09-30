@@ -28,12 +28,14 @@ const ctx = {
     namespace: "fixture",
     query: async () => [{ state: structuredClone(state), version: state.version }],
     execute: async (_sql: string, params: unknown[]) => {
+      if (_sql.startsWith("INSERT")) return { rowCount: 0 };
       if (params[3] !== state.version) return { rowCount: 0 };
       state = JSON.parse(params[0] as string); return { rowCount: 1 };
     }
   },
   issues,
   skills: { managed: { get: managedSkillGet, reset: managedSkillReset } },
+  routines: { managed: { get: async () => ({ routineId: "routine" }) } },
   agents: { managed: { get: async (role: string) => ({ agentId: role, agent: { status: "idle" } }) } },
   projects: { managed: { get: async () => ({ projectId: "project" }) } }
 } as unknown as PluginContext;
@@ -140,4 +142,18 @@ describe("review regressions", () => {
     else expect(result.body).toMatchObject({ changed: false, currentHash: hash });
     expect(managedSkillReset).not.toHaveBeenCalled();
   });
+});
+
+
+it("never takes over an expired dispatch and recovers its positively observed issue", async () => {
+  state.pendingIssue = { key: "uncertain", role: "coordinator", description: "context", leaseOwner: "old-owner", leaseUntil: "2026-01-01T00:00:00Z" };
+  const start = { repository: state.repository, prNumber: state.prNumber, mode: "fixture" };
+  const unknown = await request("start", start);
+  expect(unknown.body.pendingIssue?.leaseOwner).toBe("old-owner");
+  expect(issues.create).not.toHaveBeenCalled();
+  phaseIssues.push({ id: "recovered", companyId, originKind, originId: `${state.id}:uncertain`, status: "todo" });
+  const recovered = await request("start", start);
+  expect(recovered.body.pendingIssue).toBeNull();
+  expect(recovered.body.issueIds.uncertain).toBe("recovered");
+  expect(issues.create).not.toHaveBeenCalled();
 });

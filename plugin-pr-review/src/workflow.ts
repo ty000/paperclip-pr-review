@@ -162,6 +162,7 @@ export function applyCommand(m: Mission, command: MissionCommand): Mission {
   const p = command.payload, at = command.at;
   if (command.kind === "close") return closeMergedMission(m, command);
   if (m.stage === "merged_externally") throw new Error("Mission is closed after external merge");
+  if (m.pendingIssue?.leaseOwner) throw new Error("Phase dispatch outcome is unresolved; reconcile its origin before changing the mission");
   const next = structuredClone(m);
   next.updatedAt = at;
   if (command.kind === "context") {

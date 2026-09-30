@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-export type Stage = "context" | "initial_review" | "correction_intent" | "correction" | "final_review" | "readiness" | "waiting_external" | "needs_intervention" | "budget_exhausted" | "verified_mergeable";
+export type Stage = "context" | "initial_review" | "correction_intent" | "correction" | "final_review" | "readiness" | "waiting_external" | "needs_intervention" | "budget_exhausted" | "verified_mergeable" | "merged_externally";
 export type FindingStatus = "open" | "fixed" | "rejected" | "duplicate" | "deferred";
 export interface Finding {
   id: string; cause: string; invariant: string; severity: "critical" | "high" | "medium" | "low" | "suggestion";
@@ -41,6 +41,8 @@ export interface Mission {
   issueIds: Record<string, string>; rootIssueId: string | null; phaseSequence: number;
   effects: Record<string, { kind: string; state: "reserved" | "confirmed"; at: string; receipt?: string; resumeApplied?: boolean }>;
   verdict: { state: Stage; reasons: string[]; headSha: string; baseSha: string; at: string; sourceRefs: string[] } | null;
+  // Optional so previously persisted schemaVersion 1 missions remain readable.
+  closure?: { repository: string; prNumber: number; mergedAt: string; mergeCommitSha: string; observedAt: string; sourceRef: string; actorId: string; recordedAt: string; previousStage: Stage; pendingIssueKey: string | null; dispatchLeaseUntil: string | null; issuesReconciled: boolean };
   createdAt: string; updatedAt: string; version: number;
 }
 export type MissionCommand = { kind: string; payload: Record<string, unknown>; actorId: string; at: string };
@@ -158,6 +160,8 @@ export function evaluateReadiness(m: Mission, evidence: ReadinessEvidence, refer
 
 export function applyCommand(m: Mission, command: MissionCommand): Mission {
   const p = command.payload, at = command.at;
+  if (command.kind === "close") return closeMergedMission(m, command);
+  if (m.stage === "merged_externally") throw new Error("Mission is closed after external merge");
   const next = structuredClone(m);
   next.updatedAt = at;
   if (command.kind === "context") {
@@ -299,4 +303,28 @@ export function applyCommand(m: Mission, command: MissionCommand): Mission {
     } else { next.stage = "readiness"; next.pendingIssue = issue(next, "coordinator", "readiness", "Recheck fresh platform evidence after a relevant event."); }
   } else throw new Error("Unknown mission command");
   return next;
+}
+
+function closeMergedMission(m: Mission, command: MissionCommand): Mission {
+  const p = command.payload;
+  if (p.merged !== true) throw new Error("Explicit merged: true observation required");
+  if (p.repository !== m.repository || p.prNumber !== m.prNumber) throw new Error("Merge PR identity differs from mission");
+  const utc = (value: unknown, label: string) => {
+    const s = text(value, label);
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(s) || !Number.isFinite(Date.parse(s)) || new Date(s).toISOString().slice(0, 19) !== s.slice(0, 19)) throw new Error(`${label} must be a valid UTC timestamp`);
+    return new Date(s).toISOString();
+  };
+  const mergedAt = utc(p.mergedAt, "mergedAt"), observedAt = utc(p.observedAt, "observedAt");
+  const mergeCommitSha = sha(p.mergeCommitSha, "mergeCommitSha"), sourceRef = text(p.sourceRef, "sourceRef");
+  if (Date.parse(mergedAt) > Date.parse(observedAt)) throw new Error("Merge cannot follow its observation");
+  if (m.stage === "merged_externally") {
+    if (m.closure?.mergeCommitSha !== mergeCommitSha || m.closure.mergedAt !== mergedAt) throw new Error("Conflicting merge closure evidence");
+    return m; // A delayed retry preserves the original evidence, actor and version.
+  }
+  const age = Date.parse(command.at) - Date.parse(observedAt);
+  if (!Number.isFinite(age) || age > 600_000 || age < -60_000) throw new Error("Merge observation is stale or future-dated");
+  return {
+    ...structuredClone(m), stage: "merged_externally", pendingIssue: null, updatedAt: command.at,
+    closure: { repository: m.repository, prNumber: m.prNumber, mergedAt, mergeCommitSha, observedAt, sourceRef, actorId: command.actorId, recordedAt: command.at, previousStage: m.stage, pendingIssueKey: m.pendingIssue?.key ?? null, dispatchLeaseUntil: m.pendingIssue?.leaseUntil ?? null, issuesReconciled: false }
+  };
 }

@@ -29,3 +29,22 @@ The routine lists missions, checks live PR base/head using its Paperclip agent's
 Readiness requires complete final coverage, no open/deferred or serious rejected findings, full context, fresh matching base/head, a visible remote head claim, no conflict, satisfied rules/approvals/conversations, acceptable checks and all red jobs explained, passing tests, and an independent final review. Pending/unknown/partial conditions stop the positive verdict. A new relevant event can invalidate it.
 
 The host worker **does not independently query GitHub**. It checks the structure and consistency of evidence submitted by the coordinator, not the truth of its GitHub observations. Thus `verified_mergeable` is only an agent attestation and must not be treated as a cryptographically or independently verified merge gate. A future upstream/plugin integration could read GitHub through a supported host connection and compare remote head, branch rules, check suites/jobs, approvals, conversations and mergeability at verdict time. The current host SDK surface used here does not expose that credentialed GitHub read path to the worker. A real GitHub canary and an actual Paperclip agent run remain untested in the isolated validation.
+
+## External merge lifecycle
+
+`merged_externally` is a terminal lifecycle state, separate from the persisted
+review verdict. The coordinator observes GitHub before attempting context,
+invalidation, readiness or resume, and submits an identity-bound `/close` receipt.
+The worker stores merge metadata and provenance without equating the merge commit
+with the reviewed head or changing findings, budgets, verdicts or uncertain effects.
+Every later workflow command except a matching closure retry is rejected.
+
+Closure is persisted before cancelling owned unfinished phase issues. Exact
+origin keys, including the interrupted dispatch key, support cleanup retries;
+`closure.issuesReconciled` exposes partial cleanup. A concurrent dispatch checks
+for closure before creation and reconciles any issue created across that boundary.
+An active dispatch lease keeps cleanup pending. Completed phase issues remain
+historical records; shared routine issues are completed by the coordinator after
+all missions have been inspected. Fully reconciled closed missions are skipped.
+This is not a transaction with GitHub: already-started external effects cannot be
+revoked, and recorded merge evidence is not independently fetched by the worker.

@@ -52,3 +52,13 @@ describe("external merge closure", () => {
     expect(close(result)).toBe(result);
   });
 });
+
+
+it("does not replace a pending host dispatch with another phase, but still permits closure", () => {
+  const m = mission();
+  m.pendingIssue!.leaseOwner = "uncertain-owner";
+  for (const kind of ["invalidate", "context", "evidence", "resume"]) {
+    expect(() => applyCommand(m, { kind, payload: {}, actorId: "coordinator", at })).toThrow(/dispatch outcome is unresolved/);
+  }
+  expect(close(m).stage).toBe("merged_externally");
+});

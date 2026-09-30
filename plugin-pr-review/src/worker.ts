@@ -69,15 +69,22 @@ async function ensurePhaseIssue(ctx: PluginContext, mission: Mission): Promise<M
   const owner = randomUUID();
   const claimed = await store.change(mission.companyId, mission.id, current => {
     const pending = current.pendingIssue;
-    if (!pending || pending.key !== key || (pending.leaseUntil && Date.parse(pending.leaseUntil) > Date.now())) return current;
+    // Expiration is not evidence that a previous host create failed. Never
+    // start a second create while that dispatch's outcome remains uncertain.
+    if (!pending || pending.key !== key || pending.leaseOwner) return current;
     return { ...current, pendingIssue: { ...pending, leaseOwner: owner, leaseUntil: new Date(Date.now() + 60_000).toISOString() } };
   });
-  if (claimed.pendingIssue?.leaseOwner !== owner) return claimed;
   const pending = claimed.pendingIssue;
+  if (!pending || pending.key !== key) return claimed.stage === "merged_externally" ? closePhaseIssues(ctx, claimed) : claimed;
   const originKind = `plugin:${PLUGIN_ID}:phase`;
   const originId = `${mission.id}:${pending.key}`;
   const existing = await ctx.issues.list({ companyId: mission.companyId, originKind, originId, limit: 10 });
   if (existing.length > 1) throw new Error("Duplicate phase issues detected; operator reconciliation required");
+  // Recovery may attach a positively observed issue, but may not retry create.
+  if (pending.leaseOwner !== owner) {
+    if (!existing[0]) return claimed;
+    return recordPhaseIssue(ctx, mission, pending.key, pending.leaseOwner!, existing[0].id);
+  }
   const latest = await store.get(mission.companyId, mission.id);
   if (latest?.stage === "merged_externally") {
     const settled = await store.change(mission.companyId, mission.id, current => {
@@ -99,10 +106,14 @@ async function ensurePhaseIssue(ctx: PluginContext, mission: Mission): Promise<M
       originKind, originId, billingCode: `pr-review:${mission.id}`
     });
   }
-  const updated = await store.change(mission.companyId, mission.id, current => {
-    if (current.stage === "merged_externally") return { ...current, closure: current.closure && { ...current.closure, dispatchPending: current.closure.dispatchOwner === owner ? false : current.closure.dispatchPending, issuesReconciled: false }, issueIds: { ...current.issueIds, [pending.key]: phaseIssue!.id } };
-    if (current.pendingIssue?.key !== pending.key || current.pendingIssue.leaseOwner !== owner) return current;
-    return { ...current, rootIssueId: current.rootIssueId ?? phaseIssue!.id, pendingIssue: null, issueIds: { ...current.issueIds, [pending.key]: phaseIssue!.id } };
+  return recordPhaseIssue(ctx, mission, pending.key, owner, phaseIssue.id);
+}
+
+async function recordPhaseIssue(ctx: PluginContext, mission: Mission, key: string, owner: string, issueId: string): Promise<Mission> {
+  const updated = await new MissionStore(ctx.db).change(mission.companyId, mission.id, current => {
+    if (current.stage === "merged_externally") return { ...current, closure: current.closure && { ...current.closure, dispatchPending: current.closure.dispatchOwner === owner ? false : current.closure.dispatchPending, issuesReconciled: false }, issueIds: { ...current.issueIds, [key]: issueId } };
+    if (current.pendingIssue?.key !== key || current.pendingIssue.leaseOwner !== owner) return current;
+    return { ...current, rootIssueId: current.rootIssueId ?? issueId, pendingIssue: null, issueIds: { ...current.issueIds, [key]: issueId } };
   });
   return updated.stage === "merged_externally" ? closePhaseIssues(ctx, updated) : updated;
 }

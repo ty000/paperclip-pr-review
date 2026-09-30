@@ -143,6 +143,10 @@ An outstanding dispatch keeps cleanup pending even after its lease expires.
 Retry when it settles or its exact-origin issue becomes observable. An interrupted
 dispatch with no observable outcome needs operator investigation; elapsed time
 does not prove that creation failed. Origin lookups recover created phase issues.
+A leased dispatch is never taken over automatically, and other workflow commands
+cannot replace its pending phase. A repeated start for the same repository/PR
+reuses the existing mission and attaches a positively observed origin issue; it
+never repeats a create with an unknown outcome. Closure remains allowed.
 The routine retries cleanup for closed missions with `issuesReconciled: false`,
 and skips fully reconciled closed missions. No new review cycle is started.
 

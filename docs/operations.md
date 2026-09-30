@@ -20,7 +20,7 @@ node bin/pr-review.mjs status --api HOST_URL --company COMPANY_ID --workspace WO
 
 `plan` is read only and reports package, plugin, resource, workspace, and lifecycle states. `install` installs a local path plugin, reconciles resources by stable keys, then binds a primary workspace. It can be rerun after interruption. Managed resource reconciliation preserves changed agent instructions and titles; inspect `defaultDrift` in `status` after an upgrade. Review and explicitly apply desired template updates in Paperclip. Do not assume that `update` overwrites customized resources.
 
-The 0.2.0 manifest declares the shared `pr-review-workflow` skill plus `pr-review-coordination`, `pr-review-code-review`, and `pr-review-remediation`. The CLI reports each managed skill ID and drift. Neither installation nor setup selects the skills for an agent. See [agent and skill migration](agent-skill-migration.md) before changing an existing company.
+The 0.2.1 manifest declares the shared `pr-review-workflow` skill plus `pr-review-coordination`, `pr-review-code-review`, and `pr-review-remediation`. The CLI reports each managed skill ID and drift. Neither installation nor setup selects the skills for an agent. See [agent and skill migration](agent-skill-migration.md) before changing an existing company.
 
 After editing or pulling new sources, run `pnpm install --frozen-lockfile`, `pnpm typecheck`, `pnpm test`, `pnpm build`, and:
 
@@ -44,13 +44,7 @@ node bin/pr-review.mjs activate --api HOST_URL --company COMPANY_ID --bindings-v
 
 `skills-plan` reads each agent's actual desired list and skill snapshot. `sync-skills` adds only the shared and role-specific managed skill keys missing from each agent; it refuses a running agent and reads back each change. It preserves unrelated desired skills. A sync response does not prove mounting in the next Codex run. `activate` now requires all expected keys selected and no missing/stale snapshot state. For an existing agent, first ensure the new skill content is installed and the current bundle has been reviewed; never cut over an active mission in the middle of a run.
 
-If `skills-plan` reports managed skill drift, compare the actual skill content with the manifest and preserve operator edits. For a reviewed one-file skill that should adopt the package default, use its exact reported skill ID and current SHA-256:
-
-```bash
-node bin/pr-review.mjs sync-skill-default --api HOST_URL --company COMPANY_ID --skill SKILL_KEY --expected-skill-id SKILL_ID --expected-hash CURRENT_SHA256
-```
-
-This board-only route checks the binding, current hash, file inventory and idle/paused state of all three agents before resetting that one managed skill. It reads back the result and requires no drift. It never resets an agent bundle or all skills at once. A custom skill or an uncertain write needs a reviewed targeted recovery, not an automatic retry.
+If `skills-plan` reports managed skill drift, compare the entire company skill record and file inventory with the manifest, including operator edits to name, description, and metadata. The plugin deliberately has no `sync-skill-default` command or `/skills/default` route: the host's managed reset replaces the skill without an atomic expected-version check and can overwrite unrelated customizations. Keep the agents paused and coordinate an exclusive maintenance window before any existing-skill migration through Paperclip's supported skill editing workflow. Preserve a complete pre-state, review the intended content and metadata changes, then read back the complete record and file inventory. If an exclusive edit window or preservation of custom fields cannot be established, leave the drift unresolved and stop activation instead of using managed reset.
 
 ## Start and follow a review
 

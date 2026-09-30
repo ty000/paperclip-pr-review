@@ -67,18 +67,6 @@ async function skillAssignmentPlan(installed) {
 function managedSkillSummaries(installed) {
   return Object.fromEntries(Object.entries(installed.skills ?? {}).map(([key, resource]) => [key, { skillId: resource.skillId, currentHash: typeof resource.skill?.markdown === "string" ? sha256(resource.skill.markdown) : null, drift: resource.defaultDrift }]));
 }
-async function syncSkillDefault() {
-  await target();
-  const key = required("skill");
-  const expectedSkillId = required("expected-skill-id");
-  const expectedCurrentHash = required("expected-hash");
-  const before = (await resources()).skills?.[key];
-  if (before?.skillId !== expectedSkillId || typeof before.skill?.markdown !== "string" || sha256(before.skill.markdown) !== expectedCurrentHash) throw new Error("Managed skill changed since the reviewed snapshot");
-  const result = await request("POST", route("/skills/default"), { companyId, skillKey: key, expectedSkillId, expectedCurrentHash });
-  const after = (await resources()).skills?.[key];
-  if (after?.skillId !== expectedSkillId || after.defaultDrift || sha256(after.skill?.markdown ?? "") !== result.currentHash) throw new Error("Skill default write has uncertain or incomplete readback; inspect before retrying");
-  return { result, after: managedSkillSummaries({ skills: { [key]: after } })[key] };
-}
 async function syncSkills() {
   await target();
   const before = await skillAssignmentPlan(await resources());
@@ -191,13 +179,12 @@ async function portableExport() {
 }
 
 try {
-  if (!["plan", "install", "status", "update", "configure", "skills-plan", "sync-skill-default", "sync-skills", "activate", "export", "diff", "start", "resume"].includes(command)) throw new Error("Usage: pr-review <plan|install|status|update|configure|skills-plan|sync-skill-default|sync-skills|activate|export|diff|start|resume> --api URL --company ID [--workspace PATH|URL] [--instance NAME]");
+  if (!["plan", "install", "status", "update", "configure", "skills-plan", "sync-skills", "activate", "export", "diff", "start", "resume"].includes(command)) throw new Error("Usage: pr-review <plan|install|status|update|configure|skills-plan|sync-skills|activate|export|diff|start|resume> --api URL --company ID [--workspace PATH|URL] [--instance NAME]");
   if (command === "plan" || command === "status") show(await plan());
   else if (command === "install" || command === "update") show(await install(command === "update"));
   else if (command === "activate") show(await activate());
   else if (command === "configure") show(await configure());
   else if (command === "skills-plan") { await target(); const installed = await resources(); show({ skills: managedSkillSummaries(installed), agents: await skillAssignmentPlan(installed) }); }
-  else if (command === "sync-skill-default") show(await syncSkillDefault());
   else if (command === "sync-skills") show(await syncSkills());
   else if (command === "export") show(await portableExport());
   else if (command === "diff") {

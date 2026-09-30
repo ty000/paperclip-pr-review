@@ -1,28 +1,31 @@
 import { definePlugin, runWorker, type PluginContext, type PluginApiRequestInput } from "@paperclipai/plugin-sdk";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createMission, applyCommand, validateContext, type Mission, type MissionCommand } from "./workflow.js";
 import { MissionStore } from "./store.js";
-import { PLUGIN_ID, ROLES } from "./manifest.js";
+import { PLUGIN_ID, ROLES, SKILL_KEYS } from "./manifest.js";
 
 let context: PluginContext | null = null;
 function host(): PluginContext { if (!context) throw new Error("Plugin is not ready"); return context; }
 function object(value: unknown): Record<string, unknown> { if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("JSON object required"); return value as Record<string, unknown>; }
 function str(value: unknown, label: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${label} is required`); return value.trim(); }
+function sha256(value: string): string { return createHash("sha256").update(value).digest("hex"); }
 
 async function resources(ctx: PluginContext, companyId: string) {
   const project = await ctx.projects.managed.get("pr-review", companyId);
-  const skill = await ctx.skills.managed.get("pr-review-workflow", companyId);
+  const skills = Object.fromEntries(await Promise.all(SKILL_KEYS.map(async key => [key, await ctx.skills.managed.get(key, companyId)] as const)));
   const routine = await ctx.routines.managed.get("resume-missions", companyId);
   const agents = Object.fromEntries(await Promise.all(ROLES.map(async key => [key, await ctx.agents.managed.get(key, companyId)] as const)));
-  return { project, skill, routine, agents };
+  return { project, skill: skills["pr-review-workflow"], skills, routine, agents };
 }
 
 async function setup(ctx: PluginContext, companyId: string) {
   const project = await ctx.projects.managed.reconcile("pr-review", companyId);
-  const skill = await ctx.skills.managed.reconcile("pr-review-workflow", companyId);
+  const skillEntries = [];
+  for (const key of SKILL_KEYS) skillEntries.push([key, await ctx.skills.managed.reconcile(key, companyId)] as const);
+  const skills = Object.fromEntries(skillEntries);
   const agents = Object.fromEntries(await Promise.all(ROLES.map(async key => [key, await ctx.agents.managed.reconcile(key, companyId)] as const)));
   const routine = await ctx.routines.managed.reconcile("resume-missions", companyId);
-  return { project, skill, routine, agents };
+  return { project, skill: skills["pr-review-workflow"], skills, routine, agents };
 }
 
 async function ensurePhaseIssue(ctx: PluginContext, mission: Mission): Promise<Mission> {
@@ -66,6 +69,21 @@ async function run(input: PluginApiRequestInput) {
   const companyId = input.companyId;
   if (input.routeKey === "resources") return { body: await resources(ctx, companyId) };
   if (input.routeKey === "setup") return { body: await setup(ctx, companyId) };
+  if (input.routeKey === "skill-default") {
+    const body = object(input.body);
+    const key = str(body.skillKey, "skillKey");
+    const expectedSkillId = str(body.expectedSkillId, "expectedSkillId");
+    const expectedCurrentHash = str(body.expectedCurrentHash, "expectedCurrentHash");
+    if (!SKILL_KEYS.some(candidate => candidate === key) || !/^[a-f0-9]{64}$/.test(expectedCurrentHash)) throw new Error("Known skillKey and SHA-256 expectedCurrentHash are required");
+    const agents = await Promise.all(ROLES.map(role => ctx.agents.managed.get(role, companyId)));
+    if (agents.some(agent => !agent.agent || !["idle", "paused"].includes(agent.agent.status))) throw new Error("Wait until all managed agents are idle or paused before changing skill defaults");
+    const before = await ctx.skills.managed.get(key, companyId);
+    if (before.skillId !== expectedSkillId || !before.skill?.markdown || sha256(before.skill.markdown) !== expectedCurrentHash) throw new Error("Managed skill changed since the reviewed snapshot");
+    if (before.skill.fileInventory.some(file => file.path !== "SKILL.md")) throw new Error("Managed skill has additional files; review a targeted migration instead of resetting defaults");
+    const updated = await ctx.skills.managed.reset(key, companyId);
+    if (updated.skillId !== expectedSkillId || updated.defaultDrift) throw new Error("Skill default synchronization is incomplete; inspect current resource state");
+    return { body: { skillKey: key, skillId: updated.skillId, previousHash: expectedCurrentHash, currentHash: sha256(updated.skill?.markdown ?? ""), defaultDrift: updated.defaultDrift } };
+  }
   if (input.routeKey === "list") return { body: await store.list(companyId) };
   if (input.routeKey === "start") {
     const body = object(input.body);

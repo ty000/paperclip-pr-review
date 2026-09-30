@@ -6,7 +6,7 @@ One external plugin owns the mission ledger and all managed Paperclip resource d
 
 | Component | Decision | Source and licence |
 | --- | --- | --- |
-| Paperclip agents, issues, project, skill, routine, adapters | Reuse native host and managed resources | Paperclip, MIT, pinned host commit in README |
+| Paperclip agents, issues, project, skills, routine, adapters | Reuse native host and managed resources | Paperclip, MIT, pinned host commit in README |
 | Plugin SDK and shared types | Reuse pinned local package snapshots | Paperclip, MIT; notice in `PAPERCLIP_LICENSE.txt` |
 | PR remediation protocol | Adapt context, findings, correction intent, thread/effect reconciliation and readiness concepts | `codex-tooling` reference only; no runtime dependency or copied code |
 | Mission store and operator CLI | Develop in this repository | This repository, MIT |
@@ -14,7 +14,7 @@ One external plugin owns the mission ledger and all managed Paperclip resource d
 
 ## State and ownership
 
-`src/manifest.ts` declares stable keys for three paused agents (`coordinator`, `reviewer`, `fixer`), one project, one skill, and one paused scheduled routine. Paperclip's managed-resource reconciliation preserves customization. `migrations/001_missions.sql` creates one row per company/repository/PR. `src/store.ts` uses a versioned SQL compare-and-swap update, so concurrent triggers cannot create two active missions or silently overwrite each other's state. A leased `pendingIssue` and Paperclip issue `originKind/originId` reconcile phase issue creation after interruption. The issue stays visible in Paperclip; it is not the authoritative state.
+`src/manifest.ts` declares stable keys for three paused agents (`coordinator`, `reviewer`, `fixer`), one project, four skills, and one paused scheduled routine. Each materialized `AGENTS.md` contains durable role responsibilities; a shared workflow skill and three role skills contain reusable procedures. Selecting each agent's two skills in Paperclip is a separate operation. Paperclip's managed-resource reconciliation preserves customization. `migrations/001_missions.sql` creates one row per company/repository/PR. `src/store.ts` uses a versioned SQL compare-and-swap update, so concurrent triggers cannot create two active missions or silently overwrite each other's state. A leased `pendingIssue` and Paperclip issue `originKind/originId` reconcile phase issue creation after interruption. The issue stays visible in Paperclip; it is not the authoritative state.
 
 `src/workflow.ts` implements context → initial review → correction intent → correction and tests → refreshed context → independent final review → readiness. A reviewer must submit the pinned context hash and head. Findings have stable IDs from normalized cause, invariant and path, with observation history, dispositions and correction references. An observed recurrence reopens a fixed finding. Serious rejected findings and deferred findings block readiness. Partial coverage or unknown context blocks readiness. Decisions can close all actionable findings and advance to final review. The author of a correction cannot be the final validator.
 
